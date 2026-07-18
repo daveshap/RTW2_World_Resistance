@@ -1,0 +1,291 @@
+{
+  "schema_version": 1,
+  "title": "WR2 World Resistance effect-bundle matrix",
+  "advancement_stage": "start_turn_completed",
+  "bundle_target": "faction",
+  "application_contract": {
+    "eligibility": "every active non-human faction",
+    "war_or_relationship_filter": false,
+    "base_bundle_mode": "exactly_one_exclusive_absolute_tier",
+    "catchup_bundle_mode": "zero_or_one_exclusive_absolute_level",
+    "zero_value_rows": "omit",
+    "base_bundle_keys": [
+      "wr2_wr_ai_tier_00",
+      "wr2_wr_ai_tier_20",
+      "wr2_wr_ai_tier_40",
+      "wr2_wr_ai_tier_65",
+      "wr2_wr_ai_tier_85",
+      "wr2_wr_ai_tier_100"
+    ],
+    "base_pressure_thresholds": [0, 20, 40, 65, 85, 100],
+    "catchup_bundle_keys": [
+      "wr2_wr_ai_catchup_1",
+      "wr2_wr_ai_catchup_2",
+      "wr2_wr_ai_catchup_3"
+    ]
+  },
+  "safety_caps": {
+    "mod_owned_cost_reduction_percent": -90,
+    "construction_turns_removed": -7,
+    "recruit_rank": 9,
+    "army_armour_points": 10,
+    "army_morale_points": 10,
+    "army_melee_damage_percent": 10,
+    "experience_gain_percent": 15,
+    "replenishment_percentage_points": 50,
+    "rule": "Catch-up bundles contain no construction, recruitment, upkeep, or mercenary cost reducers, so this mod's own base-plus-catch-up stack cannot exceed the cost ceiling."
+  },
+  "effects": [
+    {
+      "metric": "construction_turns",
+      "effect_key": "rom_tech_module_engineering_construction",
+      "effect_scope": "in_all_your_regions",
+      "unit": "turns_removed",
+      "base": [-1, -2, -4, -6, -7, -7],
+      "catchup": [0, 0, 0],
+      "max_tier_100_plus_catchup_3": -7,
+      "note": "Negative removes turns. -7 is the largest observed vanilla value and should reach the engine's 1-turn floor for buildings whose base time is at most 8 turns; verify the floor in game."
+    },
+    {
+      "metric": "construction_cost",
+      "effect_key": "rom_general_local_mod_construction_costs",
+      "effect_scope": "in_all_your_regions",
+      "unit": "percent",
+      "base": [-10, -20, -40, -60, -78, -90],
+      "catchup": [0, 0, 0],
+      "max_tier_100_plus_catchup_3": -90,
+      "note": "Canonical construction-cost channel."
+    },
+    {
+      "metric": "building_gdp",
+      "effect_key": "rom_building_gdp_mod_all",
+      "effect_scope": "in_all_your_regions",
+      "unit": "percent",
+      "base": [10, 25, 60, 125, 250, 400],
+      "catchup": [40, 100, 200],
+      "max_tier_100_plus_catchup_3": 600,
+      "note": "All building GDP."
+    },
+    {
+      "metric": "tax_income",
+      "effect_key": "rom_tech_civil_economy_tax_mod",
+      "effect_scope": "this_faction",
+      "unit": "percent",
+      "base": [5, 10, 20, 40, 70, 100],
+      "catchup": [10, 25, 50],
+      "max_tier_100_plus_catchup_3": 150,
+      "note": "Intentionally combines with building GDP."
+    },
+    {
+      "metric": "recruitment_cost",
+      "effect_key": "rom_force_campaign_mod_recruitment_cost_all",
+      "effect_scope": "in_all_your_forces",
+      "unit": "percent",
+      "base": [-10, -20, -40, -60, -78, -90],
+      "catchup": [0, 0, 0],
+      "max_tier_100_plus_catchup_3": -90,
+      "note": "Canonical recruitment-cost channel."
+    },
+    {
+      "metric": "unit_upkeep",
+      "effect_key": "rom_tech_military_management_upkeep_mod",
+      "effect_scope": "in_all_your_forces",
+      "unit": "percent",
+      "base": [-10, -15, -30, -50, -70, -90],
+      "catchup": [0, 0, 0],
+      "max_tier_100_plus_catchup_3": -90,
+      "note": "Normal unit upkeep."
+    },
+    {
+      "metric": "mercenary_recruitment_cost",
+      "effect_key": "rom_tech_military_management_mercenary_cost",
+      "effect_scope": "this_faction",
+      "unit": "percent",
+      "base": [-10, -20, -40, -60, -78, -90],
+      "catchup": [0, 0, 0],
+      "max_tier_100_plus_catchup_3": -90,
+      "note": "Mercenary recruitment cost."
+    },
+    {
+      "metric": "mercenary_upkeep",
+      "effect_key": "rom_tech_military_management_mercenary_upkeep",
+      "effect_scope": "in_all_your_forces",
+      "unit": "percent",
+      "base": [-10, -15, -30, -50, -70, -90],
+      "catchup": [0, 0, 0],
+      "max_tier_100_plus_catchup_3": -90,
+      "note": "Mercenary upkeep."
+    },
+    {
+      "metric": "land_recruitment_capacity",
+      "effect_key": "rom_building_recruitment_points",
+      "effect_scope": "in_all_your_provinces",
+      "unit": "slots",
+      "base": [1, 2, 3, 4, 6, 8],
+      "catchup": [1, 2, 4],
+      "max_tier_100_plus_catchup_3": 12,
+      "note": "Additional land recruitment capacity."
+    },
+    {
+      "metric": "naval_recruitment_capacity",
+      "effect_key": "rom_building_recruitment_points_naval",
+      "effect_scope": "in_all_your_sea_regions",
+      "unit": "slots",
+      "base": [1, 1, 2, 3, 4, 6],
+      "catchup": [1, 2, 3],
+      "max_tier_100_plus_catchup_3": 9,
+      "note": "Additional naval recruitment capacity."
+    },
+    {
+      "metric": "replenishment",
+      "effect_key": "rom_force_campaign_mod_replenishment_rate",
+      "effect_scope": "in_all_your_regions",
+      "unit": "percentage_points",
+      "base": [3, 5, 8, 12, 20, 30],
+      "catchup": [4, 10, 20],
+      "max_tier_100_plus_catchup_3": 50,
+      "note": "Campaign replenishment."
+    },
+    {
+      "metric": "recruit_rank",
+      "effect_key": "rom_force_unit_mod_experience_base",
+      "effect_scope": "in_all_your_provinces",
+      "unit": "rank",
+      "base": [0, 1, 2, 3, 4, 6],
+      "catchup": [1, 2, 3],
+      "max_tier_100_plus_catchup_3": 9,
+      "advancement_stage": "start_turn_initiated",
+      "note": "Generic recruit rank only; omit zero rows and do not add unit-category rank effects."
+    },
+    {
+      "metric": "army_armour",
+      "effect_key": "rom_force_unit_mod_armour",
+      "effect_scope": "in_all_your_forces",
+      "unit": "armour_points",
+      "base": [0, 0, 2, 4, 6, 8],
+      "catchup": [0, 1, 2],
+      "max_tier_100_plus_catchup_3": 10,
+      "note": "Direct battle-stat compensation capped at an observed vanilla payload magnitude."
+    },
+    {
+      "metric": "army_morale",
+      "effect_key": "rom_force_unit_mod_morale",
+      "effect_scope": "in_all_your_forces",
+      "unit": "points",
+      "base": [0, 1, 2, 4, 6, 8],
+      "catchup": [0, 1, 2],
+      "max_tier_100_plus_catchup_3": 10,
+      "note": "Faction-wide morale compensation capped at the largest observed positive payload magnitude."
+    },
+    {
+      "metric": "army_melee_damage",
+      "effect_key": "rom_force_unit_mod_melee_damage",
+      "effect_scope": "in_all_your_forces",
+      "unit": "percent",
+      "base": [0, 0, 1, 2, 4, 6],
+      "catchup": [0, 1, 4],
+      "max_tier_100_plus_catchup_3": 10,
+      "advancement_stage": "start_turn_initiated",
+      "note": "Uses the exact faction-wide scope and advancement stage evidenced by the Mars payload; composite capped at +10%."
+    },
+    {
+      "metric": "experience_gain",
+      "effect_key": "rom_force_unit_mod_experience_gain_rate",
+      "effect_scope": "in_all_your_forces",
+      "unit": "percent",
+      "base": [2, 3, 5, 7, 9, 10],
+      "catchup": [1, 3, 5],
+      "max_tier_100_plus_catchup_3": 15,
+      "note": "Veteran units accumulate faster; composite capped at the largest observed technology payload magnitude."
+    },
+    {
+      "metric": "research_rate",
+      "effect_key": "rom_building_research_points_mod",
+      "effect_scope": "this_faction",
+      "unit": "percent",
+      "base": [10, 25, 60, 125, 250, 400],
+      "catchup": [40, 100, 200],
+      "max_tier_100_plus_catchup_3": 600,
+      "note": "All research; do not add civil/military-specific percentage effects."
+    },
+    {
+      "metric": "research_points",
+      "effect_key": "rom_building_research_points",
+      "effect_scope": "this_faction",
+      "unit": "flat_points",
+      "base": [15, 30, 60, 100, 150, 225],
+      "catchup": [25, 75, 150],
+      "max_tier_100_plus_catchup_3": 375,
+      "note": "Flat research prevents zero-infrastructure stagnation."
+    },
+    {
+      "metric": "public_order",
+      "effect_key": "rom_faction_public_order_difficulty_level",
+      "effect_scope": "in_all_your_provinces",
+      "unit": "points",
+      "base": [10, 20, 40, 75, 125, 200],
+      "catchup": [25, 75, 200],
+      "max_tier_100_plus_catchup_3": 400,
+      "note": "Deliberately extreme so AI revolts stop constraining mobilization."
+    },
+    {
+      "metric": "food",
+      "effect_key": "rom_payload_food",
+      "effect_scope": "this_faction",
+      "unit": "points",
+      "base": [20, 50, 125, 300, 800, 2000],
+      "catchup": [150, 600, 3000],
+      "max_tier_100_plus_catchup_3": 5000,
+      "note": "Faction food using the scope evidenced in AI difficulty rows."
+    },
+    {
+      "metric": "province_growth",
+      "effect_key": "rom_province_growth_province_effects",
+      "effect_scope": "in_all_your_provinces",
+      "unit": "points",
+      "base": [2, 3, 5, 8, 12, 20],
+      "catchup": [3, 7, 15],
+      "max_tier_100_plus_catchup_3": 35,
+      "note": "Settlement growth and recovery."
+    }
+  ],
+  "deliberate_exclusions": [
+    {
+      "effect_key": "rom_tech_engineering_construction_building_cost_mod",
+      "reason": "Duplicates the chosen canonical construction-cost metric and would make the cap opaque."
+    },
+    {
+      "effect_key": "rom_tech_military_management_unit_cost_mod",
+      "reason": "Duplicates the chosen canonical recruitment-cost metric and would make the cap opaque."
+    },
+    {
+      "effect_key": "rom_force_unit_mod_experience_base_infantry",
+      "reason": "Would double-stack with generic recruit rank for infantry."
+    },
+    {
+      "effect_key": "rom_force_unit_mod_experience_base_cavalry",
+      "reason": "Would double-stack with generic recruit rank for cavalry."
+    },
+    {
+      "effect_key": "rom_character_faction_leader_global_gdp_mod_all",
+      "reason": "Leader-dependent semantics are not appropriate for a persistent faction handicap."
+    },
+    {
+      "effect_key": "rom_building_research_cost_mod",
+      "reason": "The verified difficulty rows were campaign-keyed to main_gaul, so broad Grand Campaign semantics are not assumed."
+    },
+    {
+      "effect_key": "rom_faction_increase_imperium",
+      "reason": "Cap/imperium semantics were not verified strongly enough for release."
+    },
+    {
+      "effect_key": "rom_building_unit_equipment_weapon_bronze",
+      "reason": "Only province-local scope was evidenced; unsuitable for a faction-global bundle."
+    },
+    {
+      "effect_key": "rom_building_unit_training_attack_melee_cavalry",
+      "reason": "Only province-local scope was evidenced; unsuitable for a faction-global bundle."
+    }
+  ],
+  "external_stacking_warning": "The ceiling covers only this mod's exclusive base bundle plus its exclusive catch-up bundle. Vanilla campaign-difficulty, technology, building, character, and other-mod effects may add to the same metrics. In particular, a -90 mod upkeep value can cross -100 after an external AI difficulty modifier; high-difficulty smoke testing is mandatory."
+}

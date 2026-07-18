@@ -1,0 +1,162 @@
+{
+  "build_tool_version": "1.0.0",
+  "final_pack": {
+    "dependency_count": 0,
+    "file_count": 5,
+    "file_index_size": 242,
+    "file_type": 3,
+    "flags": 0,
+    "format": "PFH4",
+    "pack_size": 59579,
+    "paths": [
+      "db/effect_bundles_tables/wr2_world_resistance",
+      "db/effect_bundles_to_effects_junctions_tables/wr2_world_resistance",
+      "db/fame_levels_tables/wr2_world_resistance",
+      "lua_scripts/all_scripted.lua",
+      "lua_scripts/wr2_world_resistance.lua"
+    ],
+    "sha256": "0fff2492ac82259d14d94eeda08a7768ec6c703f868dfdb92296b779959cf01b",
+    "timestamp": 0,
+    "valid": true
+  },
+  "inputs": {
+    "fame_tsv_sha256": "6247489e644f60826e91bf38303b4dd7570bda247addb1e8f2351b0103fbfe78",
+    "lua_sha256": {
+      "lua_scripts/all_scripted.lua": "9651ad12ece2a17d80821332d7e51c1b658986abceac3ed93f022dd2d33ccd9f",
+      "lua_scripts/wr2_world_resistance.lua": "282892ec28bc92ee4c057f4a7dc7ce8fa88e57e1b009e62d7add9f94dce5a0f6"
+    },
+    "matrix_csv_sha256": "337a4e30ce7258b5efb8e110ba36e66bee30e8d6604b05b0027b5a79e17ba7aa",
+    "matrix_json_sha256": "12526c2102d85cbda2a9f5e73dbb6a6b96f067f15867c07dd76fbf07e838dff7",
+    "schema_sha256": "cbdb4f74265958ea77da2789e15093c7d12c441a7660cf95cba09e3cf5d6eecf"
+  },
+  "release_version": "0.1.0-beta",
+  "rpfm_encode": {
+    "container": {
+      "bitmask": "",
+      "compress": "None",
+      "pfh_file_type": "Mod",
+      "pfh_version": "PFH4"
+    },
+    "diagnostics": {
+      "Diagnostics": {
+        "diagnostics_ignored": [],
+        "fields_ignored": [],
+        "files_ignored": [],
+        "folders_ignored": [],
+        "results": [
+          {
+            "Config": {
+              "results": [
+                {
+                  "report_type": "IncorrectGamePath"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "game_selection": {
+      "CompressionFormatDependenciesInfo": [
+        "None",
+        null
+      ]
+    }
+  },
+  "rpfm_reopen": {
+    "container": {
+      "bitmask": "",
+      "compress": "None",
+      "pfh_file_type": "Mod",
+      "pfh_version": "PFH4"
+    },
+    "diagnostic_report_types": [
+      "IncorrectGamePath"
+    ],
+    "diagnostics": {
+      "Diagnostics": {
+        "diagnostics_ignored": [],
+        "fields_ignored": [],
+        "files_ignored": [],
+        "folders_ignored": [],
+        "results": [
+          {
+            "Config": {
+              "results": [
+                {
+                  "report_type": "IncorrectGamePath"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "environment_only_diagnostics": [
+      "IncorrectGamePath"
+    ],
+    "exports": {
+      "effect_bundles": "effect_bundles.tsv",
+      "effect_bundles_to_effects": "effect_bundles_to_effects.tsv",
+      "fame_levels": "fame_levels.tsv"
+    },
+    "game_selection": {
+      "CompressionFormatDependenciesInfo": [
+        "None",
+        null
+      ]
+    },
+    "tree_paths": [
+      "db/effect_bundles_tables/wr2_world_resistance",
+      "db/effect_bundles_to_effects_junctions_tables/wr2_world_resistance",
+      "db/fame_levels_tables/wr2_world_resistance",
+      "lua_scripts/all_scripted.lua",
+      "lua_scripts/wr2_world_resistance.lua"
+    ],
+    "unexpected_diagnostics": []
+  },
+  "target": {
+    "campaign": "main_rome",
+    "compatibility": "current stable pre-PANTHEON",
+    "fame_table_version": 4,
+    "game": "rome_2"
+  },
+  "validated_contract": {
+    "ai_prestige_thresholds": [
+      -7,
+      -6,
+      -5,
+      -4,
+      -3,
+      -2,
+      -1,
+      0
+    ],
+    "army_caps": [
+      3,
+      4,
+      6,
+      8,
+      10,
+      12,
+      14,
+      16
+    ],
+    "bundle_effect_rows": 162,
+    "effect_bundle_rows": 9,
+    "effect_count": 21,
+    "fame_rows": 8,
+    "human_player_prestige_thresholds": [
+      0,
+      4,
+      12,
+      24,
+      40,
+      60,
+      84,
+      112
+    ],
+    "unique_fame_keys": 8,
+    "zero_effect_rows": 0
+  }
+}

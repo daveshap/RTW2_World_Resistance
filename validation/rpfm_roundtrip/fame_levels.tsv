@@ -1,0 +1,10 @@
+level	campaign	ai_prestige	army_cap	champion_cap	dignitary_cap	navy_cap	player_prestige	province_initiative_cap	spy_cap	description_lookup	effect_bundle
+#fame_levels_tables;4;db/fame_levels_tables/wr2_world_resistance											
+0	main_rome	-7	3	1	1	1	0	0	1	imperium_tooltip_01	imperium_1
+1	main_rome	-6	4	1	1	2	4	1	1	imperium_tooltip_03	imperium_2
+2	main_rome	-5	6	2	2	3	12	1	2	imperium_tooltip_04	imperium_3
+3	main_rome	-4	8	2	2	4	24	2	2	imperium_tooltip_05	imperium_4
+4	main_rome	-3	10	3	3	5	40	2	3	imperium_tooltip_06	imperium_5
+5	main_rome	-2	12	3	3	6	60	3	3	imperium_tooltip_07	imperium_6
+6	main_rome	-1	14	4	4	7	84	4	4	imperium_tooltip_08	imperium_7
+7	main_rome	0	16	5	5	8	112	5	5	imperium_tooltip_09	imperium_8

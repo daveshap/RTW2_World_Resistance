@@ -1,0 +1,347 @@
+-- Integration-style simulation of the Rome II adapter. No real engine calls
+-- are made; this verifies eligibility, lifecycle, idempotence, and AI-only
+-- command targeting against interfaces shaped like the dumped Rome II API.
+
+WR2_WORLD_RESISTANCE = nil
+
+events = {
+    LoadingGame = {},
+    SavingGame = {},
+    FirstTickAfterWorldCreated = {},
+    FactionTurnStart = {},
+    FactionLeaderDeclaresWar = {}
+}
+
+local calls = {}
+local saved = {}
+local loaded = {
+    wr2_wr_pressure_v1 = 0,
+    wr2_wr_permanent_floor_v1 = 0,
+    wr2_wr_tier_v1 = 0,
+    wr2_wr_demotion_turns_v1 = 0,
+    wr2_wr_diplomacy_peak_v1 = 0
+}
+
+local function record(kind, ...)
+    table.insert(calls, { kind = kind, args = { ... } })
+end
+
+local function list(items)
+    return {
+        num_items = function(self)
+            return #items
+        end,
+        item_at = function(self, index)
+            return items[index + 1]
+        end
+    }
+end
+
+local function force(kind)
+    return {
+        is_army = function(self)
+            return kind == "army"
+        end,
+        is_navy = function(self)
+            return kind == "navy"
+        end
+    }
+end
+
+local function faction(key, human, region_count, army_count, treasury, imperium)
+    local regions = {}
+    local forces = {}
+    local i
+    for i = 1, region_count do
+        regions[i] = { key = key .. "_region_" .. tostring(i) }
+    end
+    for i = 1, army_count do
+        forces[i] = force("army")
+    end
+    local result = {
+        _key = key,
+        _human = human,
+        _regions = regions,
+        _forces = forces,
+        _treasury = treasury,
+        _imperium = imperium,
+        _wars = {}
+    }
+    function result:name()
+        return self._key
+    end
+    function result:is_human()
+        return self._human
+    end
+    function result:region_list()
+        return list(self._regions)
+    end
+    function result:military_force_list()
+        return list(self._forces)
+    end
+    function result:treasury()
+        return self._treasury
+    end
+    function result:imperium_level()
+        return self._imperium
+    end
+    function result:at_war(...)
+        if select("#", ...) ~= 0 then
+            error("Rome II at_war() takes no arguments")
+        end
+        local _, active
+        for _, active in pairs(self._wars) do
+            if active then
+                return true
+            end
+        end
+        return false
+    end
+    return result
+end
+
+local rome = faction("rom_rome", true, 90, 16, 100000, 7)
+local ally = faction("rom_athens", false, 4, 2, 5000, 2)
+local neutral = faction("rom_arverni", false, 3, 1, 1000, 2)
+local enemy = faction("rom_carthage", false, 6, 3, 9000, 3)
+local dormant = faction("rom_dormant", false, 0, 0, 0, 0)
+
+ally._wars[neutral._key] = true
+neutral._wars[ally._key] = true
+
+local factions = { rome, ally, neutral, enemy, dormant }
+local all_regions = {}
+local i
+for i = 1, 173 do
+    all_regions[i] = { key = "region_" .. tostring(i) }
+end
+
+local model = {}
+local world = {}
+function model:world()
+    return world
+end
+function model:campaign_name()
+    return "main_rome"
+end
+function model:turn_number()
+    return 77
+end
+function world:faction_list()
+    return list(factions)
+end
+function world:region_manager()
+    return {
+        region_list = function(self)
+            return list(all_regions)
+        end
+    }
+end
+
+local game = {}
+function game:model()
+    return model
+end
+function game:apply_effect_bundle(bundle, faction_key, duration)
+    record("apply_effect_bundle", bundle, faction_key, duration)
+end
+function game:remove_effect_bundle(bundle, faction_key)
+    record("remove_effect_bundle", bundle, faction_key)
+end
+function game:treasury_mod(faction_key, amount)
+    record("treasury_mod", faction_key, amount)
+end
+function game:force_diplomacy(a, b, deal, offer, accept)
+    record("force_diplomacy", a, b, deal, offer, accept)
+end
+function game:cai_strategic_stance_manager_promote_specified_stance_towards_target_faction(a, b, stance)
+    record("promote_stance", a, b, stance)
+end
+function game:force_make_peace(a, b)
+    record("force_make_peace", a, b)
+    local left, right
+    for _, item in ipairs(factions) do
+        if item._key == a then left = item end
+        if item._key == b then right = item end
+    end
+    if left and right then
+        left._wars[b] = false
+        right._wars[a] = false
+    end
+end
+function game:force_make_trade_agreement(a, b)
+    record("force_make_trade_agreement", a, b)
+end
+function game:save_named_value(key, value, context)
+    saved[key] = value
+    record("save_named_value", key, value)
+end
+function game:load_named_value(key, default, context)
+    record("load_named_value", key)
+    if loaded[key] == nil then
+        return default
+    end
+    return loaded[key]
+end
+
+scripting = { game_interface = game }
+
+local WR = dofile("../pack_root/lua_scripts/wr2_world_resistance.lua")
+WR.config.diplomacy_pair_budget_first_tick = 2
+WR.config.diplomacy_pair_budget_ai_turn = 1
+
+local assertions = 0
+local function assert_true(value, message)
+    assertions = assertions + 1
+    if not value then
+        error(message or "assertion failed", 2)
+    end
+end
+local function count_calls(kind)
+    local count = 0
+    for _, call in ipairs(calls) do
+        if call.kind == kind then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+assert_true(#events.FirstTickAfterWorldCreated == 1, "one FirstTick listener")
+assert_true(#events.LoadingGame == 1, "one LoadingGame listener")
+assert_true(#events.SavingGame == 1, "one SavingGame listener")
+
+-- Loading reads primitives and performs no mutation.
+events.LoadingGame[1]({})
+local mutation_before_first_tick = count_calls("apply_effect_bundle")
+    + count_calls("remove_effect_bundle")
+    + count_calls("treasury_mod")
+    + count_calls("force_diplomacy")
+    + count_calls("promote_stance")
+    + count_calls("force_make_peace")
+assert_true(mutation_before_first_tick == 0, "LoadingGame is read-only")
+
+events.FirstTickAfterWorldCreated[1]({})
+local after_first_tick = #calls
+local cached_pairs_after_first_tick = 0
+for _, _ in pairs(WR.runtime.diplomacy_mode_by_pair) do
+    cached_pairs_after_first_tick = cached_pairs_after_first_tick + 1
+end
+assert_true(cached_pairs_after_first_tick == 2, "first callback obeys the diplomacy pair budget")
+
+-- A second callback in the same Lua campaign session must be a no-op.
+events.FirstTickAfterWorldCreated[1]({})
+assert_true(#calls == after_first_tick, "FirstTick initialization is idempotent")
+
+-- A later AI turn resumes the bounded all-pairs reconciliation.
+events.FactionTurnStart[1]({
+    faction = function(self)
+        return enemy
+    end
+})
+local cached_pairs_after_ai_turn = 0
+for _, _ in pairs(WR.runtime.diplomacy_mode_by_pair) do
+    cached_pairs_after_ai_turn = cached_pairs_after_ai_turn + 1
+end
+assert_true(cached_pairs_after_ai_turn == 3, "AI turn resumes and completes queued diplomacy")
+
+local applied_by_faction = {}
+local treasury_by_faction = {}
+for _, call in ipairs(calls) do
+    if call.kind == "apply_effect_bundle" then
+        local faction_key = call.args[2]
+        applied_by_faction[faction_key] = (applied_by_faction[faction_key] or 0) + 1
+    elseif call.kind == "treasury_mod" then
+        treasury_by_faction[call.args[1]] = true
+    elseif call.kind == "force_diplomacy"
+        or call.kind == "force_make_peace"
+        or call.kind == "force_make_trade_agreement"
+        or call.kind == "promote_stance" then
+        local a = call.args[1]
+        local b = call.args[2]
+        assert_true(a ~= "rom_rome" and b ~= "rom_rome", "diplomacy call must be AI-to-AI")
+        assert_true(a ~= "rom_dormant" and b ~= "rom_dormant", "dormant faction must not be targeted")
+    end
+end
+
+assert_true(applied_by_faction.rom_athens == 2, "ally receives full base and catch-up scaling")
+assert_true(applied_by_faction.rom_arverni == 2, "neutral receives full base and catch-up scaling")
+assert_true(applied_by_faction.rom_carthage == 2, "enemy receives full base and catch-up scaling")
+assert_true(applied_by_faction.rom_rome == nil, "human receives no applied bundle")
+assert_true(applied_by_faction.rom_dormant == nil, "dormant faction receives no bundle")
+assert_true(treasury_by_faction.rom_athens, "ally receives treasury parity")
+assert_true(treasury_by_faction.rom_arverni, "neutral receives treasury parity")
+assert_true(treasury_by_faction.rom_carthage, "enemy receives treasury parity")
+assert_true(treasury_by_faction.rom_rome == nil, "human receives no treasury grant")
+assert_true(count_calls("force_make_peace") == 1, "existing AI-AI war is ended at tier 85")
+assert_true(ally._wars[neutral._key] ~= true, "mock AI-AI war state is peaceful")
+assert_true(count_calls("promote_stance") == 6, "all three AI pairs receive bidirectional stance promotion")
+assert_true(count_calls("force_make_trade_agreement") == 0, "forced trade waits for tier 100")
+
+local snapshot = WR.debug_snapshot()
+assert_true(snapshot.ai_count == 3, "all and only active AIs counted")
+assert_true(snapshot.tier == 4, "ninety regions reaches tier 85")
+assert_true(snapshot.target_armies == 16, "final Imperium army parity target")
+
+events.SavingGame[1]({})
+assert_true(saved.wr2_wr_pressure_v1 ~= nil, "pressure saved")
+assert_true(saved.wr2_wr_permanent_floor_v1 == 65, "permanent floor saved")
+assert_true(saved.wr2_wr_tier_v1 == 4, "tier saved")
+assert_true(saved.wr2_wr_diplomacy_peak_v1 == 4, "diplomacy high-water mark saved")
+
+-- Seventy percent of the live map reaches tier 100. Every AI pair is then
+-- trade-forced while war remains blocked; no command may include the human.
+for i = #rome._regions + 1, 122 do
+    rome._regions[i] = { key = "rom_rome_region_" .. tostring(i) }
+end
+events.FactionTurnStart[1]({
+    faction = function(self)
+        return rome
+    end
+})
+local maximum = WR.debug_snapshot()
+assert_true(maximum.pressure == 100, "seventy percent map reaches pressure 100")
+assert_true(maximum.tier == 5, "pressure 100 applies the maximum tier")
+assert_true(maximum.diplomacy_peak == 5, "maximum diplomacy mode is permanent")
+assert_true(count_calls("force_make_trade_agreement") == 3, "all AI pairs receive forced trade at maximum")
+
+-- If an AI declaration slips through the campaign AI, the audited event
+-- exposes the declarer's character. The callback must end only AI-AI wars.
+enemy._wars[neutral._key] = true
+neutral._wars[enemy._key] = true
+events.FactionLeaderDeclaresWar[1]({
+    character = function(self)
+        return {
+            faction = function(self)
+                return enemy
+            end
+        }
+    end
+})
+assert_true(enemy._wars[neutral._key] ~= true, "AI-AI declaration is immediately neutralised")
+
+-- A human declaration never invokes the peace routine, preserving every
+-- player-facing diplomatic choice.
+rome._wars[enemy._key] = true
+enemy._wars[rome._key] = true
+events.FactionLeaderDeclaresWar[1]({
+    character = function(self)
+        return {
+            faction = function(self)
+                return rome
+            end
+        }
+    end
+})
+assert_true(rome._wars[enemy._key] == true, "human wars are never rewritten")
+
+for _, call in ipairs(calls) do
+    if call.kind == "force_diplomacy"
+        or call.kind == "force_make_peace"
+        or call.kind == "force_make_trade_agreement"
+        or call.kind == "promote_stance" then
+        assert_true(call.args[1] ~= "rom_rome" and call.args[2] ~= "rom_rome", "maximum-tier diplomacy remains AI-only")
+    end
+end
+
+print("World Resistance engine simulation: " .. tostring(assertions) .. " assertions passed")

@@ -1,0 +1,11 @@
+key	localised_description	localised_title	ui_icon	bundle_target
+#effect_bundles_tables;1;db/effect_bundles_tables/wr2_world_resistance				
+wr2_wr_ai_tier_00				faction
+wr2_wr_ai_tier_20				faction
+wr2_wr_ai_tier_40				faction
+wr2_wr_ai_tier_65				faction
+wr2_wr_ai_tier_85				faction
+wr2_wr_ai_tier_100				faction
+wr2_wr_ai_catchup_1				faction
+wr2_wr_ai_catchup_2				faction
+wr2_wr_ai_catchup_3				faction
