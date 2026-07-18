@@ -10,7 +10,9 @@
 --   * World mutation begins at FirstTickAfterWorldCreated, never LoadingGame.
 --   * Save data consists only of primitive values supported by Rome II.
 
-local VERSION = 2
+local VERSION = 3
+local RELEASE_VERSION = "0.1.1-beta"
+local TELEMETRY_SCHEMA = 1
 local GLOBAL_KEY = "WR2_WORLD_RESISTANCE"
 
 local existing = rawget(_G, GLOBAL_KEY)
@@ -103,7 +105,21 @@ WR.config = {
     diplomacy_pair_budget_human_turn = 80,
     diplomacy_pair_budget_ai_turn = 20,
 
-    log_each_human_turn = true
+    log_each_human_turn = true,
+    local_diagnostics_enabled = true,
+    diagnostic_log_path = "data/wr2_world_resistance.log",
+    detailed_audit_turn_interval = 10,
+
+    -- Rome II requires custom message-event keys to be custom_event_ followed
+    -- only by digits. This high, release-owned range minimizes collision risk.
+    status_event_keys = {
+        [0] = "custom_event_23182000",
+        [1] = "custom_event_23182001",
+        [2] = "custom_event_23182002",
+        [3] = "custom_event_23182003",
+        [4] = "custom_event_23182004",
+        [5] = "custom_event_23182005"
+    }
 }
 
 local function clamp(value, low, high)
@@ -140,16 +156,40 @@ local function pair_key(a, b)
     return b .. "|" .. a
 end
 
+local function write_native_line(line)
+    -- Rome II exposes out as a table (out.ting/out.tom), not as a callable
+    -- function. Keep fallbacks for test harnesses and unusual script loaders.
+    local out_api = rawget(_G, "out")
+    if type(out_api) == "table" and type(out_api.ting) == "function" then
+        local ok = pcall(function()
+            out_api.ting(line)
+        end)
+        if ok then
+            return true
+        end
+    end
+
+    local output_api = rawget(_G, "output")
+    if type(output_api) == "function" then
+        local ok = pcall(output_api, line)
+        if ok then
+            return true
+        end
+    end
+
+    local print_api = rawget(_G, "print")
+    if type(print_api) == "function" then
+        local ok = pcall(print_api, line)
+        if ok then
+            return true
+        end
+    end
+    return false
+end
+
 local logged_once = {}
 local function write_log(message)
-    local line = "[WR2 World Resistance] " .. tostring(message)
-    if type(rawget(_G, "output")) == "function" then
-        output(line)
-    elseif type(rawget(_G, "out")) == "function" then
-        out(line)
-    elseif type(rawget(_G, "print")) == "function" then
-        print(line)
-    end
+    write_native_line("[WR2 World Resistance] " .. tostring(message))
 end
 
 local function write_log_once(key, message)
@@ -160,6 +200,95 @@ local function write_log_once(key, message)
 end
 
 WR.log = write_log
+
+local diagnostic_sink_disabled = false
+local diagnostic_sink_warning_emitted = false
+
+local function telemetry_value(value)
+    local text = tostring(value == nil and "" or value)
+    text = string.gsub(text, "[\r\n\t|]", " ")
+    if string.len(text) > 160 then
+        text = string.sub(text, 1, 160)
+    end
+    return text
+end
+
+local function telemetry_line(event_name, fields)
+    local parts = {
+        "WR2",
+        "schema=" .. tostring(TELEMETRY_SCHEMA),
+        "event=" .. telemetry_value(event_name),
+        "release=" .. RELEASE_VERSION,
+        "director=" .. tostring(VERSION)
+    }
+    local i
+    for i = 1, #fields do
+        local field = fields[i]
+        table.insert(parts, telemetry_value(field[1]) .. "=" .. telemetry_value(field[2]))
+    end
+    return table.concat(parts, "|")
+end
+
+WR.telemetry_line = telemetry_line
+
+local function append_diagnostic_lines(lines)
+    if WR.config.local_diagnostics_enabled ~= true or #lines == 0 then
+        return false, nil
+    end
+    if diagnostic_sink_disabled then
+        return false, "diagnostic sink previously disabled"
+    end
+
+    local io_api = rawget(_G, "io")
+    if type(io_api) ~= "table" or type(io_api.open) ~= "function" then
+        diagnostic_sink_disabled = true
+        return false, "io.open is unavailable"
+    end
+
+    local ok, result = pcall(function()
+        local file, open_error = io_api.open(WR.config.diagnostic_log_path, "a")
+        if file == nil then
+            error(tostring(open_error or "open returned nil"), 0)
+        end
+
+        local write_ok, write_error = pcall(function()
+            file:write(table.concat(lines, "\n"))
+            file:write("\n")
+            file:flush()
+        end)
+        local close_ok, close_error = pcall(function()
+            file:close()
+        end)
+        if not write_ok then
+            error(tostring(write_error), 0)
+        end
+        if not close_ok then
+            error(tostring(close_error), 0)
+        end
+        return true
+    end)
+
+    if not ok or result ~= true then
+        diagnostic_sink_disabled = true
+        return false, tostring(result)
+    end
+    return true, nil
+end
+
+local function emit_telemetry(file_lines, native_lines)
+    local _, failure = append_diagnostic_lines(file_lines)
+    if failure ~= nil and not diagnostic_sink_warning_emitted then
+        diagnostic_sink_warning_emitted = true
+        write_native_line(
+            "[WR2 World Resistance] local diagnostics disabled safely: " .. tostring(failure)
+        )
+    end
+
+    local i
+    for i = 1, #native_lines do
+        write_native_line(native_lines[i])
+    end
+end
 
 -- -------------------------------------------------------------------------
 -- Pure calculations (kept engine-independent for simulation tests)
@@ -344,6 +473,8 @@ end
 local runtime = {
     initialized = false,
     listeners_registered = false,
+    ui_created = false,
+    highest_notified_tier = -1,
     game = nil,
     state = {
         pressure = 0,
@@ -356,6 +487,10 @@ local runtime = {
     catchup_bundle_by_faction = {},
     diplomacy_mode_by_pair = {},
     last_treasury_turn = nil,
+    last_telemetry_turn = nil,
+    last_audit_turn = nil,
+    telemetry_session_started = false,
+    war_notice_turn_by_faction = {},
     last_stats = nil,
     last_summary = nil
 }
@@ -366,7 +501,8 @@ local SAVE_KEYS = {
     permanent_floor = "wr2_wr_permanent_floor_v1",
     tier = "wr2_wr_tier_v1",
     demotion_turns = "wr2_wr_demotion_turns_v1",
-    diplomacy_peak = "wr2_wr_diplomacy_peak_v1"
+    diplomacy_peak = "wr2_wr_diplomacy_peak_v1",
+    highest_notified_tier = "wr2_wr_highest_notified_tier_v1"
 }
 
 local function safe_read(label, callback, default)
@@ -501,6 +637,7 @@ local function collect_world_stats()
         humans = {},
         ais = {},
         human = {
+            key = "",
             regions = 0,
             armies = 0,
             treasury = 0,
@@ -541,6 +678,9 @@ local function collect_world_stats()
                 if metric.human then
                     table.insert(stats.humans, metric)
                     if metric.active then
+                        if stats.human.key == "" then
+                            stats.human.key = metric.key
+                        end
                         stats.human.regions = stats.human.regions + metric.regions
                         -- Multi-human is unsupported, but max individual
                         -- military/treasury power is safer than summing it.
@@ -691,13 +831,20 @@ end
 
 local function reconcile_faction(ai, stats, grant_treasury)
     if ai.human or not ai.active then
-        return 0, 0
+        return 0, 0, nil
     end
 
     local tier = runtime.state.tier
     local catchup = WR.catchup_level(ai, stats.human, runtime.state.permanent_floor)
     local desired_base = WR.config.tiers[tier + 1].bundle
     local desired_catchup = WR.config.catchup_bundles[catchup]
+    local treasury_target = WR.treasury_target(
+        ai,
+        stats.human,
+        tier,
+        catchup,
+        runtime.state.permanent_floor
+    )
     local changes = 0
 
     if apply_bundle_exclusive(ai.key, desired_base, BASE_BUNDLES, runtime.base_bundle_by_faction) then
@@ -711,7 +858,22 @@ local function reconcile_faction(ai, stats, grant_treasury)
     if grant_treasury then
         grant = grant_treasury_to_floor(ai, stats.human, tier, catchup, runtime.state.permanent_floor)
     end
-    return changes, grant
+    return changes, grant, {
+        faction = ai.key,
+        regions = ai.regions,
+        armies = ai.armies,
+        navies = ai.navies,
+        treasury_before = ai.treasury,
+        treasury_target = treasury_target,
+        grant = grant,
+        expected_after = (tonumber(ai.treasury) or 0) + grant,
+        catchup = catchup,
+        base_bundle = desired_base,
+        catchup_bundle = desired_catchup or "none",
+        base_command_ok = runtime.base_bundle_by_faction[ai.key] == desired_base,
+        catchup_command_ok = runtime.catchup_bundle_by_faction[ai.key]
+            == (desired_catchup or false)
+    }
 end
 
 
@@ -846,7 +1008,8 @@ end
 local function reconcile_diplomacy(stats, pair_budget)
     local mode = runtime.state.diplomacy_peak
     if mode <= 0 then
-        return 0, 0, 0
+        local total = (#stats.ais * (#stats.ais - 1)) / 2
+        return 0, 0, 0, total, 0
     end
 
     local budget = math.max(tonumber(pair_budget) or WR.config.diplomacy_pair_budget_ai_turn, 0)
@@ -867,7 +1030,13 @@ local function reconcile_diplomacy(stats, pair_budget)
             wars_ended = wars_ended + pair_wars
         end
     end
-    return changed_pairs, calls, wars_ended
+    local pending = 0
+    for i = 1, #pairs do
+        if runtime.diplomacy_mode_by_pair[pairs[i].key] ~= mode then
+            pending = pending + 1
+        end
+    end
+    return changed_pairs, calls, wars_ended, #pairs, pending
 end
 
 
@@ -911,6 +1080,142 @@ local function update_pressure_state(stats)
 end
 
 
+local function tier_threshold(tier_index)
+    local index = clamp(tonumber(tier_index) or 0, 0, #WR.config.tiers - 1)
+    return WR.config.tiers[index + 1].threshold
+end
+
+
+local function audit_reason_for_update(stats, previous_tier, options)
+    local opts = options or {}
+    if opts.session_start then
+        return "session_start"
+    end
+    if runtime.state.tier > previous_tier then
+        return "tier_escalation"
+    end
+    local interval = math.max(tonumber(WR.config.detailed_audit_turn_interval) or 0, 0)
+    if interval > 0
+        and stats.turn >= 0
+        and stats.turn % interval == 0
+        and runtime.last_audit_turn ~= stats.turn then
+        return "scheduled"
+    end
+    return nil
+end
+
+
+local function emit_world_telemetry(stats, summary, faction_audits, audit_reason, options)
+    local opts = options or {}
+    local file_lines = {}
+    local native_lines = {}
+
+    if opts.session_start and not runtime.telemetry_session_started then
+        local session = telemetry_line("SESSION_START", {
+            { "campaign", stats.campaign },
+            { "turn", stats.turn },
+            { "human", stats.human.key },
+            { "log_path", WR.config.diagnostic_log_path },
+            { "local_only", true }
+        })
+        table.insert(file_lines, session)
+        table.insert(native_lines, session)
+        runtime.telemetry_session_started = true
+    end
+
+    local state_due = runtime.last_telemetry_turn ~= stats.turn
+        and (opts.log_summary or WR.config.log_each_human_turn)
+    if state_due then
+        local state = telemetry_line("STATE", {
+            { "campaign", stats.campaign },
+            { "turn", stats.turn },
+            { "human", stats.human.key },
+            { "human_regions", stats.human.regions },
+            { "world_regions", stats.total_regions },
+            { "map_pct", round(summary.territory_share * 100) },
+            { "armies", stats.human.armies },
+            { "treasury", stats.human.treasury },
+            { "imperium", stats.human.imperium },
+            { "pressure", summary.pressure },
+            { "floor", runtime.state.permanent_floor },
+            { "tier", tier_threshold(summary.tier) },
+            { "tier_index", summary.tier },
+            { "desired_tier", tier_threshold(summary.desired_tier) },
+            { "diplomacy_peak", tier_threshold(summary.diplomacy_peak) },
+            { "active_ai", summary.ai_count },
+            { "target_armies", summary.target_armies },
+            { "catchup_0", summary.catchup_counts[1] },
+            { "catchup_1", summary.catchup_counts[2] },
+            { "catchup_2", summary.catchup_counts[3] },
+            { "catchup_3", summary.catchup_counts[4] },
+            { "base_commands_ok", summary.base_commands_ok },
+            { "catchup_commands_ok", summary.catchup_commands_ok },
+            { "bundle_changes", summary.bundle_changes },
+            { "grant_count", summary.treasury_grant_count },
+            { "grant_total", summary.treasury_granted },
+            { "pairs_total", summary.diplomatic_pairs_total },
+            { "pairs_updated", summary.diplomatic_pairs },
+            { "pairs_pending", summary.diplomatic_pairs_pending },
+            { "diplomatic_calls", summary.diplomatic_calls },
+            { "peace_commands", summary.wars_ended }
+        })
+        table.insert(file_lines, state)
+        table.insert(native_lines, state)
+        runtime.last_telemetry_turn = stats.turn
+    end
+
+    if audit_reason ~= nil and runtime.last_audit_turn ~= stats.turn then
+        table.sort(faction_audits, function(left, right)
+            return left.faction < right.faction
+        end)
+        local audit_begin = telemetry_line("AI_AUDIT_BEGIN", {
+            { "turn", stats.turn },
+            { "reason", audit_reason },
+            { "active_ai", #faction_audits }
+        })
+        table.insert(file_lines, audit_begin)
+        table.insert(native_lines, audit_begin)
+
+        local i
+        for i = 1, #faction_audits do
+            local audit = faction_audits[i]
+            table.insert(file_lines, telemetry_line("AI", {
+                { "turn", stats.turn },
+                { "faction", audit.faction },
+                { "regions", audit.regions },
+                { "armies", audit.armies },
+                { "navies", audit.navies },
+                { "treasury_before", audit.treasury_before },
+                { "treasury_target", audit.treasury_target },
+                { "grant", audit.grant },
+                { "expected_after", audit.expected_after },
+                { "catchup", audit.catchup },
+                { "base_bundle", audit.base_bundle },
+                { "catchup_bundle", audit.catchup_bundle },
+                { "base_command_ok", audit.base_command_ok },
+                { "catchup_command_ok", audit.catchup_command_ok }
+            }))
+        end
+
+        local audit_end = telemetry_line("AI_AUDIT_END", {
+            { "turn", stats.turn },
+            { "active_ai", #faction_audits },
+            { "catchup_0", summary.catchup_counts[1] },
+            { "catchup_1", summary.catchup_counts[2] },
+            { "catchup_2", summary.catchup_counts[3] },
+            { "catchup_3", summary.catchup_counts[4] },
+            { "base_commands_ok", summary.base_commands_ok },
+            { "catchup_commands_ok", summary.catchup_commands_ok }
+        })
+        table.insert(file_lines, audit_end)
+        table.insert(native_lines, audit_end)
+        runtime.last_audit_turn = stats.turn
+    end
+
+    emit_telemetry(file_lines, native_lines)
+end
+
+
 local function reconcile_world(options)
     local opts = options or {}
     local stats = collect_world_stats()
@@ -931,10 +1236,16 @@ local function reconcile_world(options)
         return false
     end
 
+    local previous_tier = runtime.state.tier
     local share, desired_tier = update_pressure_state(stats)
     local active_keys = {}
     local bundle_changes = 0
     local treasury_granted = 0
+    local treasury_grant_count = 0
+    local catchup_counts = { 0, 0, 0, 0 }
+    local base_commands_ok = 0
+    local catchup_commands_ok = 0
+    local faction_audits = {}
     local i
 
     -- Human isolation is reasserted at every full update. This is a small,
@@ -945,13 +1256,27 @@ local function reconcile_world(options)
     for i = 1, #stats.ais do
         local ai = stats.ais[i]
         active_keys[ai.key] = true
-        local changed, grant = reconcile_faction(ai, stats, opts.grant_treasury == true)
+        local changed, grant, audit = reconcile_faction(ai, stats, opts.grant_treasury == true)
         bundle_changes = bundle_changes + changed
         treasury_granted = treasury_granted + grant
+        if grant > 0 then
+            treasury_grant_count = treasury_grant_count + 1
+        end
+        if audit ~= nil then
+            catchup_counts[audit.catchup + 1] = catchup_counts[audit.catchup + 1] + 1
+            if audit.base_command_ok then
+                base_commands_ok = base_commands_ok + 1
+            end
+            if audit.catchup_command_ok then
+                catchup_commands_ok = catchup_commands_ok + 1
+            end
+            table.insert(faction_audits, audit)
+        end
     end
     cleanup_inactive_cached_factions(active_keys)
 
-    local diplomatic_pairs, diplomatic_calls, wars_ended = reconcile_diplomacy(
+    local diplomatic_pairs, diplomatic_calls, wars_ended,
+        diplomatic_pairs_total, diplomatic_pairs_pending = reconcile_diplomacy(
         stats,
         opts.diplomacy_pair_budget
     )
@@ -967,41 +1292,67 @@ local function reconcile_world(options)
         ai_count = #stats.ais,
         bundle_changes = bundle_changes,
         treasury_granted = treasury_granted,
+        treasury_grant_count = treasury_grant_count,
+        catchup_counts = catchup_counts,
+        base_commands_ok = base_commands_ok,
+        catchup_commands_ok = catchup_commands_ok,
         diplomatic_pairs = diplomatic_pairs,
+        diplomatic_pairs_total = diplomatic_pairs_total,
+        diplomatic_pairs_pending = diplomatic_pairs_pending,
         diplomatic_calls = diplomatic_calls,
         wars_ended = wars_ended,
         target_armies = WR.target_armies(stats.human, runtime.state.permanent_floor)
     }
 
-    if opts.log_summary or WR.config.log_each_human_turn then
-        write_log(
-            "turn=" .. tostring(stats.turn)
-            .. " pressure=" .. tostring(runtime.state.pressure)
-            .. " tier=" .. tostring(runtime.state.tier)
-            .. " map=" .. tostring(round(share * 100)) .. "%"
-            .. " AI=" .. tostring(#stats.ais)
-            .. " target_armies=" .. tostring(runtime.last_summary.target_armies)
-            .. " bundle_changes=" .. tostring(bundle_changes)
-            .. " treasury_granted=" .. tostring(treasury_granted)
-            .. " diplomacy_pairs=" .. tostring(diplomatic_pairs)
-            .. " wars_ended=" .. tostring(wars_ended)
-        )
-    end
+    emit_world_telemetry(
+        stats,
+        runtime.last_summary,
+        faction_audits,
+        audit_reason_for_update(stats, previous_tier, opts),
+        opts
+    )
     return true
 end
 
 
-local function metric_for_key(stats, key)
-    if stats == nil then
-        return nil
+local function try_show_status()
+    if not runtime.initialized or not runtime.ui_created or runtime.last_summary == nil then
+        return false
     end
-    local i
-    for i = 1, #stats.factions do
-        if stats.factions[i].key == key then
-            return stats.factions[i]
-        end
+    local tier = runtime.state.tier
+    if tier <= runtime.highest_notified_tier then
+        return false
     end
-    return nil
+    local event_key = WR.config.status_event_keys[tier]
+    if event_key == nil then
+        write_log_once("missing-status-event:" .. tostring(tier), "No status event for tier " .. tostring(tier))
+        return false
+    end
+
+    local shown = safe_engine_call("show_message_event:" .. event_key, function()
+        -- Rome II uses the original three-argument signature. Later Total War
+        -- titles expose a different overload which must not be used here.
+        runtime.game:show_message_event(event_key, 0, 0)
+    end)
+    if not shown then
+        return false
+    end
+
+    runtime.highest_notified_tier = tier
+    local notice = telemetry_line("UI_NOTICE", {
+        { "turn", runtime.last_summary.turn },
+        { "event_key", event_key },
+        { "tier", tier_threshold(tier) },
+        { "pressure", runtime.last_summary.pressure }
+    })
+    emit_telemetry({ notice }, { notice })
+    return true
+end
+
+
+local function on_ui_created(_context)
+    runtime.ui_created = true
+    try_show_status()
 end
 
 
@@ -1026,6 +1377,14 @@ local function on_loading_game(context)
     runtime.state.diplomacy_peak = safe_read("load:diplomacy_peak", function()
         return runtime.game:load_named_value(SAVE_KEYS.diplomacy_peak, 0, context)
     end, 0)
+    local loaded_notified_tier = safe_read("load:highest_notified_tier", function()
+        return runtime.game:load_named_value(SAVE_KEYS.highest_notified_tier, -1, context)
+    end, -1)
+    runtime.highest_notified_tier = clamp(
+        tonumber(loaded_notified_tier) or -1,
+        -1,
+        #WR.config.tiers - 1
+    )
 end
 
 
@@ -1048,6 +1407,13 @@ local function on_saving_game(context)
     safe_engine_call("save:diplomacy_peak", function()
         runtime.game:save_named_value(SAVE_KEYS.diplomacy_peak, runtime.state.diplomacy_peak, context)
     end)
+    safe_engine_call("save:highest_notified_tier", function()
+        runtime.game:save_named_value(
+            SAVE_KEYS.highest_notified_tier,
+            runtime.highest_notified_tier,
+            context
+        )
+    end)
 end
 
 
@@ -1058,11 +1424,15 @@ local function on_first_tick_after_world_created(_context)
     end
     runtime.initialized = true
     write_log("initializing version " .. tostring(VERSION))
-    reconcile_world({
+    local reconciled = reconcile_world({
         grant_treasury = true,
         diplomacy_pair_budget = WR.config.diplomacy_pair_budget_first_tick,
-        log_summary = true
+        log_summary = true,
+        session_start = true
     })
+    if reconciled then
+        try_show_status()
+    end
 end
 
 
@@ -1089,11 +1459,14 @@ local function on_faction_turn_start(context)
         if grant then
             runtime.last_treasury_turn = turn
         end
-        reconcile_world({
+        local reconciled = reconcile_world({
             grant_treasury = grant,
             diplomacy_pair_budget = WR.config.diplomacy_pair_budget_human_turn,
             log_summary = true
         })
+        if reconciled then
+            try_show_status()
+        end
         return
     end
 
@@ -1138,7 +1511,17 @@ local function on_faction_declares_war(context)
     if stats ~= nil
         and stats.campaign == WR.config.supported_campaign
         and #stats.humans > 0 then
-        enforce_peace_for_faction(metric, stats)
+        local peace_commands = enforce_peace_for_faction(metric, stats)
+        if peace_commands > 0
+            and runtime.war_notice_turn_by_faction[metric.key] ~= stats.turn then
+            runtime.war_notice_turn_by_faction[metric.key] = stats.turn
+            local notice = telemetry_line("AI_WAR_SUPPRESSED", {
+                { "turn", stats.turn },
+                { "declaring_faction", metric.key },
+                { "peace_commands", peace_commands }
+            })
+            emit_telemetry({ notice }, { notice })
+        end
     end
 end
 
@@ -1211,6 +1594,7 @@ local function initialize_engine_adapter()
 
     register_listener("LoadingGame", on_loading_game)
     register_listener("SavingGame", on_saving_game)
+    register_listener("UICreated", on_ui_created)
     register_listener("FirstTickAfterWorldCreated", on_first_tick_after_world_created)
     register_listener("FactionTurnStart", on_faction_turn_start)
     register_listener("FactionLeaderDeclaresWar", on_faction_declares_war)

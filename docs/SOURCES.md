@@ -39,15 +39,16 @@ The schema repository contains multiple `fame_levels` versions, including v4 and
 | [ConsulScriptum](https://github.com/bukowa/ConsulScriptum/tree/95085275d9ad20167e72231a7c3304ab04d97777) | `95085275d9ad20167e72231a7c3304ab04d97777`, 2026-05-28 | Current Rome II API/event dump, lifecycle guidance, diplomacy strings, vanilla-preserving loader pattern |
 | [Total War Rome II docs](https://github.com/bukowa/twr2docs/tree/aeaece2b77f5ae7f197cf14184a367ce58a6e4e9) | `aeaece2b77f5ae7f197cf14184a367ce58a6e4e9`, 2026-04-25 | Rome II Lua loading order |
 | [Rome II Lua Profiler](https://github.com/bukowa/rome2_luaprofiler/tree/00a5cda98a3c12fe06ea7fca2ac627f5dac3d859) | `00a5cda98a3c12fe06ea7fca2ac627f5dac3d859` | Working `all_scripted.lua` pack pattern |
+| [Official Rome II Seasons and Wonders update](https://wiki.totalwar.com/w/Total_War_ROME_II%3A_Season_and_Wonders_Update.html) | Published CA wiki | Rome II's three-argument `show_message_event` signature and numeric `custom_event_` key rule |
 | [Official Attila campaign interface](https://wiki.totalwar.com/w/Total_War%3A_ATTILA_KIT_-_Campaign_Script_Interface) | Published CA wiki | Sibling-engine signatures for effect bundles, treasury, peace, trade, diplomacy, and stance calls |
 
-The audited event set is `LoadingGame`, `SavingGame`, `FirstTickAfterWorldCreated`, `FactionTurnStart`, and `FactionLeaderDeclaresWar`. The current Rome II faction dump includes `imperium_level`, `is_human`, `region_list`, `military_force_list`, `treasury`, and no `is_dead` method.
+The audited event set is `LoadingGame`, `SavingGame`, `UICreated`, `FirstTickAfterWorldCreated`, `FactionTurnStart`, and `FactionLeaderDeclaresWar`. The current Rome II faction dump includes `imperium_level`, `is_human`, `region_list`, `military_force_list`, `treasury`, and no `is_dead` method. The current registry and vanilla EpisodicScripting expose the native logger as the table method `out.ting`, not callable `out()`.
 
 ## Decoded Workshop evidence
 
 | Pack | Workshop page | SHA-256 | Use |
 |---|---|---|---|
-| Guaranteed Major Faction Empires | [233589292](https://steamcommunity.com/sharedfiles/filedetails/?id=233589292) | `c20f2273d86b0dde6f92097fc0eecad742a042e2d9a569ad207b2603dd6b342a` | Historical Rome II loader/event patterns and warnings against invasive overrides/spawning |
+| Guaranteed Major Faction Empires | [233589292](https://steamcommunity.com/sharedfiles/filedetails/?id=233589292) | `c20f2273d86b0dde6f92097fc0eecad742a042e2d9a569ad207b2603dd6b342a` | Working Rome II three-argument status message, four-culture title/body Loc pattern, local campaign log, and historical loader/event patterns |
 | Radious AI Mod – Patch 17 Only | [186967731](https://steamcommunity.com/sharedfiles/filedetails/?id=186967731) | `4778192e6c810d6b42290610d22c9180c06047e91034c08239aee8cba62bba55` | Vanilla-derived difficulty effect rows |
 | Radious Campaign Features Mod – Patch 17 Only | [186967968](https://steamcommunity.com/sharedfiles/filedetails/?id=186967968) | `2c6b13e54699e5b3a523dc59c8d9536ef519c168d2b387594b736f6899df0fe8` | Effect/scope pairs and historical fame data |
 | Increase army cap | [1082051626](https://steamcommunity.com/sharedfiles/filedetails/?id=1082051626) | `7cb69cb281192b6643cd9e3be5a911952587958da6d607bb5cf9f9b683bec996` | Public Grand Campaign fame-table layout and unchanged non-army columns; not copied as a balance mod |

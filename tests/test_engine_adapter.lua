@@ -7,19 +7,27 @@ WR2_WORLD_RESISTANCE = nil
 events = {
     LoadingGame = {},
     SavingGame = {},
+    UICreated = {},
     FirstTickAfterWorldCreated = {},
     FactionTurnStart = {},
     FactionLeaderDeclaresWar = {}
 }
 
 local calls = {}
+local native_logs = {}
+out = {
+    ting = function(line)
+        table.insert(native_logs, line)
+    end
+}
 local saved = {}
 local loaded = {
     wr2_wr_pressure_v1 = 0,
     wr2_wr_permanent_floor_v1 = 0,
     wr2_wr_tier_v1 = 0,
     wr2_wr_demotion_turns_v1 = 0,
-    wr2_wr_diplomacy_peak_v1 = 0
+    wr2_wr_diplomacy_peak_v1 = 0,
+    wr2_wr_highest_notified_tier_v1 = -1
 }
 
 local function record(kind, ...)
@@ -172,6 +180,9 @@ end
 function game:force_make_trade_agreement(a, b)
     record("force_make_trade_agreement", a, b)
 end
+function game:show_message_event(event_key, x, y)
+    record("show_message_event", event_key, x, y)
+end
 function game:save_named_value(key, value, context)
     saved[key] = value
     record("save_named_value", key, value)
@@ -210,6 +221,7 @@ end
 assert_true(#events.FirstTickAfterWorldCreated == 1, "one FirstTick listener")
 assert_true(#events.LoadingGame == 1, "one LoadingGame listener")
 assert_true(#events.SavingGame == 1, "one SavingGame listener")
+assert_true(#events.UICreated == 1, "one UICreated listener")
 
 -- Loading reads primitives and performs no mutation.
 events.LoadingGame[1]({})
@@ -220,14 +232,54 @@ local mutation_before_first_tick = count_calls("apply_effect_bundle")
     + count_calls("promote_stance")
     + count_calls("force_make_peace")
 assert_true(mutation_before_first_tick == 0, "LoadingGame is read-only")
+assert_true(count_calls("show_message_event") == 0, "LoadingGame never invokes UI")
+
+-- UI may be created before the campaign world is ready; no status message is
+-- legal until the first successful reconciliation completes.
+events.UICreated[1]({})
+assert_true(count_calls("show_message_event") == 0, "UICreated alone does not show status")
+
+-- A denied diagnostic-file write must fail closed while native out.ting and
+-- every campaign mutation continue normally.
+local real_io = io
+io = {
+    open = function()
+        return nil, "simulated read-only game directory"
+    end
+}
 
 events.FirstTickAfterWorldCreated[1]({})
+io = real_io
 local after_first_tick = #calls
 local cached_pairs_after_first_tick = 0
 for _, _ in pairs(WR.runtime.diplomacy_mode_by_pair) do
     cached_pairs_after_first_tick = cached_pairs_after_first_tick + 1
 end
 assert_true(cached_pairs_after_first_tick == 2, "first callback obeys the diplomacy pair budget")
+assert_true(count_calls("show_message_event") == 1, "successful first reconciliation shows status")
+assert_true(
+    calls[#calls].kind == "show_message_event"
+        and calls[#calls].args[1] == "custom_event_23182004",
+    "initial status matches the active Tier 85 band"
+)
+local saw_session = false
+local saw_state = false
+local saw_file_failure = false
+for _, line in ipairs(native_logs) do
+    if string.find(line, "WR2|schema=1|event=SESSION_START", 1, true) then
+        saw_session = true
+    end
+    if string.find(line, "WR2|schema=1|event=STATE", 1, true)
+        and string.find(line, "|active_ai=3|", 1, true) then
+        saw_state = true
+    end
+    if string.find(line, "local diagnostics disabled safely", 1, true) then
+        saw_file_failure = true
+    end
+end
+assert_true(saw_session, "native out.ting receives the session trace")
+assert_true(saw_state, "native out.ting receives the structured state trace")
+assert_true(saw_file_failure, "file failure is reported natively and remains nonfatal")
 
 -- A second callback in the same Lua campaign session must be a no-op.
 events.FirstTickAfterWorldCreated[1]({})
@@ -288,6 +340,20 @@ assert_true(saved.wr2_wr_pressure_v1 ~= nil, "pressure saved")
 assert_true(saved.wr2_wr_permanent_floor_v1 == 65, "permanent floor saved")
 assert_true(saved.wr2_wr_tier_v1 == 4, "tier saved")
 assert_true(saved.wr2_wr_diplomacy_peak_v1 == 4, "diplomacy high-water mark saved")
+assert_true(saved.wr2_wr_highest_notified_tier_v1 == 4, "highest UI tier saved")
+
+-- Restoring the saved high-water mark and recreating the UI must not repeat an
+-- already acknowledged tier notification.
+for key, value in pairs(saved) do
+    loaded[key] = value
+end
+local notices_before_reload = count_calls("show_message_event")
+events.LoadingGame[1]({})
+events.UICreated[1]({})
+assert_true(
+    count_calls("show_message_event") == notices_before_reload,
+    "saved UI high-water mark prevents reload duplicates"
+)
 
 -- Seventy percent of the live map reaches tier 100. Every AI pair is then
 -- trade-forced while war remains blocked; no command may include the human.
@@ -304,6 +370,14 @@ assert_true(maximum.pressure == 100, "seventy percent map reaches pressure 100")
 assert_true(maximum.tier == 5, "pressure 100 applies the maximum tier")
 assert_true(maximum.diplomacy_peak == 5, "maximum diplomacy mode is permanent")
 assert_true(count_calls("force_make_trade_agreement") == 3, "all AI pairs receive forced trade at maximum")
+assert_true(count_calls("show_message_event") == 2, "maximum tier creates one additional notice")
+local last_status_key = nil
+for _, call in ipairs(calls) do
+    if call.kind == "show_message_event" then
+        last_status_key = call.args[1]
+    end
+end
+assert_true(last_status_key == "custom_event_23182005", "maximum notice uses the Tier 100 event")
 
 -- If an AI declaration slips through the campaign AI, the audited event
 -- exposes the declarer's character. The callback must end only AI-AI wars.

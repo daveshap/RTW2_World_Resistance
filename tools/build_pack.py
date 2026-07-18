@@ -6,8 +6,8 @@ The build is deliberately two-stage:
 1. RPFM 5, using the current Rome II schema, imports the validated TSV source
    and produces the opaque binary DB payloads.
 2. The local PFH4 writer strips RPFM-only metadata, gives each DB table a stable
-   path-derived GUID, adds the two Lua files, and emits a deterministic
-   five-file Mod pack with no dependencies or flags.
+   path-derived GUID, adds the localization and two Lua files, and emits a
+   deterministic eight-file Mod pack with no dependencies or flags.
 
 The final pack is then reopened by a fresh RPFM process, every DB table is
 exported again, and diagnostics are recorded.  This keeps RPFM authoritative
@@ -25,6 +25,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import struct
 import sys
@@ -40,8 +41,8 @@ except ImportError:  # Direct execution from the tools directory.
     from rpfm_ws_client import RpfmWsError, RpfmWsSession
 
 
-BUILD_TOOL_VERSION = "1.0.0"
-RELEASE_VERSION = "0.1.0-beta"
+BUILD_TOOL_VERSION = "1.1.0"
+RELEASE_VERSION = "0.1.1-beta"
 GAME_KEY = "rome_2"
 CAMPAIGN_KEY = "main_rome"
 
@@ -194,6 +195,40 @@ FAME_HEADER = [
     "description_lookup",
     "effect_bundle",
 ]
+MESSAGE_EVENTS_HEADER = [
+    "event",
+    "instant_open",
+    "layout",
+    "requires_response",
+    "priority",
+]
+MESSAGE_EVENT_STRINGS_HEADER = [
+    "event",
+    "optional_campaign_key",
+    "culture",
+    "optional_subculture",
+    "text",
+    "image",
+    "icon",
+    "sound_event",
+]
+LOC_HEADER = ["key", "text", "tooltip"]
+
+STATUS_EVENT_KEYS = [f"custom_event_2318200{index}" for index in range(6)]
+STATUS_TEXT_KEYS = [
+    "wr2_wr_status_00",
+    "wr2_wr_status_20",
+    "wr2_wr_status_40",
+    "wr2_wr_status_65",
+    "wr2_wr_status_85",
+    "wr2_wr_status_100",
+]
+STATUS_CULTURES = [
+    "rom_Barbarian",
+    "rom_Eastern",
+    "rom_Hellenistic",
+    "rom_Roman",
+]
 
 DB_SPECS = [
     (
@@ -214,14 +249,29 @@ DB_SPECS = [
         4,
         "db/fame_levels_tables/wr2_world_resistance",
     ),
+    (
+        "message_events",
+        "message_events_tables",
+        1,
+        "db/message_events_tables/wr2_world_resistance",
+    ),
+    (
+        "message_event_strings",
+        "message_event_strings_tables",
+        3,
+        "db/message_event_strings_tables/wr2_world_resistance",
+    ),
 ]
+
+LOC_NAME = "wr2_world_resistance.loc"
+LOC_PATH = "text/db/wr2_world_resistance.loc"
 
 LUA_PATHS = [
     "lua_scripts/all_scripted.lua",
     "lua_scripts/wr2_world_resistance.lua",
 ]
 REQUIRED_PACK_PATHS = sorted(
-    [spec[3] for spec in DB_SPECS] + LUA_PATHS,
+    [spec[3] for spec in DB_SPECS] + [LOC_PATH] + LUA_PATHS,
     key=lambda path: (path.replace("/", "\\").lower(), path.replace("/", "\\")),
 )
 RPFM_RESERVED_PATHS = {
@@ -493,6 +543,84 @@ def validate_fame(path: Path) -> list[list[str]]:
     return rows
 
 
+def validate_observability_sources(project: Path) -> dict[str, Path]:
+    sources = {
+        "message_events": project / "db_src" / "message_events.tsv",
+        "message_event_strings": project / "db_src" / "message_event_strings.tsv",
+        "localisation": project / "db_src" / "wr2_world_resistance.loc.tsv",
+    }
+
+    event_header, event_metadata, event_rows = _parse_tsv(sources["message_events"])
+    if event_header != MESSAGE_EVENTS_HEADER:
+        raise BuildError("message_events.tsv has an unexpected header")
+    if event_metadata != (
+        "#message_events_tables;1;db/message_events_tables/wr2_world_resistance"
+    ):
+        raise BuildError("message_events.tsv has unexpected RPFM metadata")
+    expected_events = [
+        [event, "true", "standard", "true", "100"] for event in STATUS_EVENT_KEYS
+    ]
+    if event_rows != expected_events:
+        raise BuildError("message_events.tsv differs from the six-event UI contract")
+    if any(re.fullmatch(r"custom_event_[0-9]+", row[0]) is None for row in event_rows):
+        raise BuildError("Rome II custom event keys must be custom_event_ followed by digits")
+
+    strings_header, strings_metadata, strings_rows = _parse_tsv(
+        sources["message_event_strings"]
+    )
+    if strings_header != MESSAGE_EVENT_STRINGS_HEADER:
+        raise BuildError("message_event_strings.tsv has an unexpected header")
+    if strings_metadata != (
+        "#message_event_strings_tables;3;"
+        "db/message_event_strings_tables/wr2_world_resistance"
+    ):
+        raise BuildError("message_event_strings.tsv has unexpected RPFM metadata")
+    expected_strings = [
+        [
+            event,
+            "",
+            culture,
+            "",
+            text_key,
+            "rom_land_victory.png",
+            "rom_event_military.png",
+            "campaign_ui_message_neutral",
+        ]
+        for event, text_key in zip(STATUS_EVENT_KEYS, STATUS_TEXT_KEYS, strict=True)
+        for culture in STATUS_CULTURES
+    ]
+    if strings_rows != expected_strings:
+        raise BuildError("message_event_strings.tsv differs from the culture-complete UI contract")
+    string_keys = [(row[0], row[1], row[2], row[3]) for row in strings_rows]
+    if len(string_keys) != len(set(string_keys)):
+        raise BuildError("message_event_strings contains duplicate composite keys")
+
+    loc_header, loc_metadata, loc_rows = _parse_tsv(sources["localisation"])
+    if loc_header != LOC_HEADER or loc_metadata != f"#Loc;1;{LOC_PATH}":
+        raise BuildError("World Resistance Loc source has an unexpected header or metadata")
+    loc_by_key = {row[0]: row for row in loc_rows}
+    if len(loc_rows) != 30 or len(loc_by_key) != 30:
+        raise BuildError("World Resistance Loc must contain exactly 30 unique rows")
+    expected_loc_keys = {
+        f"message_event_text_text_{text_key}" for text_key in STATUS_TEXT_KEYS
+    }
+    expected_loc_keys.update(
+        f"message_event_strings_title_{event}{culture}"
+        for event in STATUS_EVENT_KEYS
+        for culture in STATUS_CULTURES
+    )
+    if set(loc_by_key) != expected_loc_keys:
+        raise BuildError("World Resistance Loc keys do not close every title/body reference")
+    if any(not row[1] or row[2] != "true" for row in loc_rows):
+        raise BuildError("World Resistance Loc contains an empty string or invalid tooltip flag")
+    for text_key in STATUS_TEXT_KEYS:
+        body = loc_by_key[f"message_event_text_text_{text_key}"][1]
+        if "data/wr2_world_resistance.log" not in body or "No data leaves" not in body:
+            raise BuildError("status body must disclose the local diagnostics path and locality")
+
+    return sources
+
+
 def generate_effect_tsvs(project: Path, matrix: dict[str, Any]) -> dict[str, Path]:
     db_source = project / "db_src"
     bundle_path = db_source / "effect_bundles.tsv"
@@ -536,11 +664,13 @@ def generate_effect_tsvs(project: Path, matrix: dict[str, Any]) -> dict[str, Pat
     )
     _atomic_write_text(bundle_path, bundle_text)
     _atomic_write_text(junction_path, junction_text)
-    return {
+    sources = {
         "effect_bundles": bundle_path,
         "effect_bundles_to_effects": junction_path,
         "fame_levels": project / "db_src" / "fame_levels.tsv",
     }
+    sources.update(validate_observability_sources(project))
+    return sources
 
 
 def _copy_schema(source: Path, home: Path) -> Path:
@@ -565,6 +695,14 @@ def _new_db_table(
     )
     if response != "Success":
         raise BuildError(f"RPFM failed to create {internal_path}: {response!r}")
+
+
+def _new_loc_file(session: RpfmWsSession, pack_key: str) -> None:
+    response = session.call(
+        {"NewPackedFile": [pack_key, LOC_PATH, {"Loc": LOC_NAME}]}
+    )
+    if response != "Success":
+        raise BuildError(f"RPFM failed to create {LOC_PATH}: {response!r}")
 
 
 def _import_tsv(session: RpfmWsSession, pack_key: str, internal_path: str, source: Path) -> None:
@@ -603,16 +741,18 @@ def _normalize_rpfm_stage(stage_pack: Path, output: Path, project: Path) -> dict
     archive = read_pack(blob)
     all_entries = archive.as_dict()
     database_paths = {spec[3] for spec in DB_SPECS}
-    if not database_paths.issubset(all_entries):
-        missing = sorted(database_paths.difference(all_entries))
-        raise BuildError(f"RPFM stage pack is missing DB payloads: {missing}")
-    unexpected = set(all_entries).difference(database_paths).difference(RPFM_RESERVED_PATHS)
+    encoded_paths = database_paths | {LOC_PATH}
+    if not encoded_paths.issubset(all_entries):
+        missing = sorted(encoded_paths.difference(all_entries))
+        raise BuildError(f"RPFM stage pack is missing encoded payloads: {missing}")
+    unexpected = set(all_entries).difference(encoded_paths).difference(RPFM_RESERVED_PATHS)
     if unexpected:
         raise BuildError(f"RPFM stage pack has unexpected files: {sorted(unexpected)}")
 
     final_entries = {
         path: _canonicalize_db_guid(all_entries[path], path) for path in database_paths
     }
+    final_entries[LOC_PATH] = all_entries[LOC_PATH]
     lua_root = project / "pack_root"
     actual_lua: list[str] = []
     for item in lua_root.rglob("*"):
@@ -629,8 +769,8 @@ def _normalize_rpfm_stage(stage_pack: Path, output: Path, project: Path) -> dict
 
     write_pack_file(output, final_entries)
     report = validate_pack(output.read_bytes())
-    if report["paths"] != REQUIRED_PACK_PATHS or report["file_count"] != 5:
-        raise BuildError(f"final pack paths differ from the exact five-file contract: {report['paths']}")
+    if report["paths"] != REQUIRED_PACK_PATHS or report["file_count"] != 8:
+        raise BuildError(f"final pack paths differ from the exact eight-file contract: {report['paths']}")
     return report
 
 
@@ -699,6 +839,8 @@ def _rpfm_encode(
         for filename, table, version, internal_path in DB_SPECS:
             _new_db_table(session, pack_key, filename, table, version, internal_path)
             _import_tsv(session, pack_key, internal_path, tsv_paths[filename])
+        _new_loc_file(session, pack_key)
+        _import_tsv(session, pack_key, LOC_PATH, tsv_paths["localisation"])
         diagnostics = session.call({"DiagnosticsCheck": [[], False]})
         saved = session.call({"SavePackAs": [pack_key, str(stage_pack.resolve())]})
         if not (isinstance(saved, dict) and "ContainerInfo" in saved):
@@ -750,13 +892,20 @@ def _rpfm_reopen_validate(
             if response != "Success":
                 raise BuildError(f"RPFM failed to export {internal_path}: {response!r}")
             exports[filename] = destination
+        destination = export_root / "wr2_world_resistance.loc.tsv"
+        response = session.call(
+            {"ExportTSV": [pack_key, LOC_PATH, str(destination.resolve()), "PackFile"]}
+        )
+        if response != "Success":
+            raise BuildError(f"RPFM failed to export {LOC_PATH}: {response!r}")
+        exports["localisation"] = destination
         diagnostics = session.call({"DiagnosticsCheck": [[], False]})
 
     expected_rows = _rows_by_name(expected_tsvs)
     exported_rows = _rows_by_name(exports)
     if exported_rows != expected_rows:
         mismatched = [name for name in expected_rows if expected_rows[name] != exported_rows[name]]
-        raise BuildError(f"RPFM DB round-trip changed rows in: {mismatched}")
+        raise BuildError(f"RPFM DB/Loc round-trip changed rows in: {mismatched}")
     # Re-apply the strongest fame validator to the RPFM-exported table.
     validate_fame(exports["fame_levels"])
 
@@ -803,6 +952,9 @@ def build(arguments: argparse.Namespace) -> dict[str, object]:
     junction_header, junction_metadata, junction_rows = _parse_tsv(
         tsv_paths["effect_bundles_to_effects"]
     )
+    _, _, message_event_rows = _parse_tsv(tsv_paths["message_events"])
+    _, _, message_string_rows = _parse_tsv(tsv_paths["message_event_strings"])
+    _, _, localisation_rows = _parse_tsv(tsv_paths["localisation"])
     if bundle_header != EFFECT_BUNDLE_HEADER or len(bundle_rows) != 9:
         raise BuildError("generated effect_bundles table failed validation")
     if bundle_metadata != "#effect_bundles_tables;1;db/effect_bundles_tables/wr2_world_resistance":
@@ -860,6 +1012,11 @@ def build(arguments: argparse.Namespace) -> dict[str, object]:
             "matrix_json_sha256": _sha256(project / "config" / "bundle_matrix.json"),
             "matrix_csv_sha256": _sha256(project / "config" / "bundle_matrix.csv"),
             "fame_tsv_sha256": _sha256(project / "db_src" / "fame_levels.tsv"),
+            "message_events_tsv_sha256": _sha256(tsv_paths["message_events"]),
+            "message_event_strings_tsv_sha256": _sha256(
+                tsv_paths["message_event_strings"]
+            ),
+            "localisation_tsv_sha256": _sha256(tsv_paths["localisation"]),
             "lua_sha256": {
                 path: _sha256(project / "pack_root" / path) for path in LUA_PATHS
             },
@@ -871,6 +1028,11 @@ def build(arguments: argparse.Namespace) -> dict[str, object]:
             "zero_effect_rows": 0,
             "fame_rows": len(fame_rows),
             "unique_fame_keys": len({(row[0], row[1]) for row in fame_rows}),
+            "message_event_rows": len(message_event_rows),
+            "message_event_string_rows": len(message_string_rows),
+            "localisation_rows": len(localisation_rows),
+            "custom_event_keys": STATUS_EVENT_KEYS,
+            "message_event_cultures": STATUS_CULTURES,
             "ai_prestige_thresholds": [int(row[2]) for row in fame_rows],
             "human_player_prestige_thresholds": [int(row[7]) for row in fame_rows],
             "army_caps": [int(row[3]) for row in fame_rows],

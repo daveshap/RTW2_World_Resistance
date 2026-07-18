@@ -44,6 +44,7 @@ The source was designed and checked against:
 - the current RPFM Rome II schema snapshot and exact table field types;
 - real decoded PFH4 Rome II Workshop rows for all selected effect/scope pairs;
 - a current Rome II scripting API and event dump;
+- Rome II's documented three-argument custom message-event path and a working Workshop implementation exported through RPFM;
 - Lua 5.1 syntax and pure/mocked simulations, including all-faction eligibility and the no-human-diplomacy invariant;
 - deterministic PFH4 structure tests and pack round-trip tooling.
 
@@ -59,20 +60,24 @@ Use a disposable profile or backed-up saves. Test with no other mods before comb
 2. Enable only `wr2_world_resistance.pack`.
 3. Cold-start to the main menu. A failure before the menu points first to pack/schema/loader conflicts.
 4. Start a new Grand Campaign and reach the first human turn.
-5. Confirm the human receives none of the nine `wr2_wr_` bundles and no treasury grant.
-6. Inspect several neutral, allied, client, distant, and hostile AI factions. Every active AI should receive one base bundle; weak ones should receive one catch-up bundle as well.
-7. Confirm an AI can legally raise armies toward the 16-army cap without any spawned or duplicate force.
-8. End at least one full turn and watch for a freeze during the faction sequence.
-9. Save, exit to menu, reload, and verify bundles did not duplicate and treasury was not granted repeatedly within one turn.
-10. Enter a battle, return to campaign, and continue an AI turn.
-11. Damage or sabotage a building under construction, then repair, capture, and convert it. Confirm the `-7` construction-turn effect respects a one-turn floor and does not break repair state.
-12. At a disposable high-pressure state, verify AI-to-AI peace, inability to declare ordinary AI wars, protected agreements, and direct legal trade attempts. Also verify AI can still declare war on and negotiate with the human normally.
-13. Test Normal first, then each intended campaign difficulty. Check construction and recruitment prices and upkeep for negative or nonsensical values.
-14. Run at least 20 AI turns at high pressure and inspect logs after every save/load and battle return.
+5. Confirm a **WORLD RESISTANCE ACTIVE** message appears only after the campaign map finishes reconciling.
+6. Open `data/wr2_world_resistance.log`. Confirm it contains one `SESSION_START`, one `STATE`, and an `AI_AUDIT_BEGIN`/`AI`/`AI_AUDIT_END` block for the current turn.
+7. Confirm the human receives none of the nine `wr2_wr_` bundles and no treasury grant.
+8. In the audit block, inspect several neutral, allied, client, distant, and hostile AI factions. Every active AI should have a base selection; weak ones should have a catch-up selection as well.
+9. Confirm an AI can legally raise armies toward the 16-army cap without any spawned or duplicate force.
+10. End at least one full turn and watch for a freeze during the faction sequence. Confirm exactly one new `STATE` line appears for the next human turn.
+11. Save, exit to menu, reload, and verify the acknowledged tier popup does not repeat, bundles do not duplicate, and treasury is not granted repeatedly within one turn.
+12. Enter a battle, return to campaign, and continue an AI turn.
+13. Damage or sabotage a building under construction, then repair, capture, and convert it. Confirm the `-7` construction-turn effect respects a one-turn floor and does not break repair state.
+14. At a disposable high-pressure state, verify a new tier popup, AI-to-AI peace, inability to declare ordinary AI wars, protected agreements, and direct legal trade attempts. Also verify AI can still declare war on and negotiate with the human normally.
+15. Test Normal first, then each intended campaign difficulty. Check construction and recruitment prices and upkeep for negative or nonsensical values.
+16. Run at least 20 AI turns at high pressure and inspect the local diagnostics after every save/load and battle return.
 
 ## Specific acceptance criteria
 
 - The game reaches the campaign map from a cold process with only this pack enabled.
+- The activation/tier message appears after successful reconciliation, never during `LoadingGame`, and an acknowledged tier does not repeat after reload.
+- Each human turn produces at most one structured `STATE`; detailed audits include every active non-human faction exactly once and exclude the human and dormant factions.
 - Exactly one base bundle and zero or one catch-up bundle exist on every active AI.
 - No World Resistance bundle, treasury grant, stance promotion, forced treaty, or forced peace touches a human endpoint.
 - Repeated loading and battle return do not accumulate base or catch-up tiers.
@@ -99,4 +104,5 @@ Include:
 - exact pack filename and SHA-256 from the release report;
 - the last successful step: menu, campaign load, first turn, end turn, save/load, or battle return;
 - the relevant `script_error` or modified log excerpt;
+- the `SESSION_START`, latest `STATE`, and surrounding `AI_AUDIT` lines from `data/wr2_world_resistance.log`;
 - whether the failure reproduces with only World Resistance enabled from a clean process.

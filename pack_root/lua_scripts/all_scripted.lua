@@ -18,7 +18,14 @@ events = triggers.events
 local wr_ok, wr_error = pcall(require, "lua_scripts.wr2_world_resistance")
 if not wr_ok then
     local message = "[WR2 World Resistance] loader error: " .. tostring(wr_error)
-    if type(rawget(_G, "print")) == "function" then
-        print(message)
+    local out_api = rawget(_G, "out")
+    local logged = false
+    if type(out_api) == "table" and type(out_api.ting) == "function" then
+        logged = pcall(function()
+            out_api.ting(message)
+        end)
+    end
+    if not logged and type(rawget(_G, "print")) == "function" then
+        pcall(print, message)
     end
 end

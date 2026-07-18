@@ -1,0 +1,8 @@
+event	instant_open	layout	requires_response	priority
+#message_events_tables;1;db/message_events_tables/wr2_world_resistance				
+custom_event_23182000	true	standard	true	100
+custom_event_23182001	true	standard	true	100
+custom_event_23182002	true	standard	true	100
+custom_event_23182003	true	standard	true	100
+custom_event_23182004	true	standard	true	100
+custom_event_23182005	true	standard	true	100

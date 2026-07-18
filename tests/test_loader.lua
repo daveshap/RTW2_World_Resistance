@@ -9,6 +9,7 @@ scripting = nil
 local exported_events = {
     LoadingGame = {},
     SavingGame = {},
+    UICreated = {},
     FirstTickAfterWorldCreated = {},
     FactionTurnStart = {},
     FactionLeaderDeclaresWar = {}
@@ -49,8 +50,9 @@ for i = 1, #imports do
 end
 assert(#events.LoadingGame == 1, "LoadingGame listener missing")
 assert(#events.SavingGame == 1, "SavingGame listener missing")
+assert(#events.UICreated == 1, "UICreated listener missing")
 assert(#events.FirstTickAfterWorldCreated == 1, "FirstTick listener missing")
 assert(#events.FactionTurnStart == 1, "FactionTurnStart listener missing")
 assert(#events.FactionLeaderDeclaresWar == 1, "war listener missing")
 
-print("World Resistance loader simulation: 13 assertions passed")
+print("World Resistance loader simulation: 14 assertions passed")

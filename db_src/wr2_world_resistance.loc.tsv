@@ -1,0 +1,32 @@
+key	text	tooltip
+#Loc;1;text/db/wr2_world_resistance.loc		
+message_event_text_text_wr2_wr_status_00	World Resistance completed its campaign update.\\n\\nResistance tier: 0 - Observation. Every active AI faction is included from turn one; weaker factions may also receive catch-up support.\\n\\nExact local diagnostics: data/wr2_world_resistance.log\\nNo data leaves your computer.	true
+message_event_text_text_wr2_wr_status_20	World Resistance has escalated.\\n\\nResistance tier: 20 - Readiness. Every active AI faction now receives the Tier 20 package, with additional catch-up support where required.\\n\\nExact local diagnostics: data/wr2_world_resistance.log\\nNo data leaves your computer.	true
+message_event_text_text_wr2_wr_status_40	World Resistance has escalated.\\n\\nResistance tier: 40 - Mobilisation. Every active AI faction now receives the Tier 40 package, with stronger economic, military, stability, and research support.\\n\\nExact local diagnostics: data/wr2_world_resistance.log\\nNo data leaves your computer.	true
+message_event_text_text_wr2_wr_status_65	World Resistance has escalated.\\n\\nResistance tier: 65 - Coalition. Every active AI faction now receives the Tier 65 package. AI-to-AI cooperation and agreement protection are at coalition strength.\\n\\nExact local diagnostics: data/wr2_world_resistance.log\\nNo data leaves your computer.	true
+message_event_text_text_wr2_wr_status_85	World Resistance has escalated.\\n\\nResistance tier: 85 - World Front. Every active AI faction now receives the Tier 85 package. AI-to-AI war offers are blocked and peace enforcement is active.\\n\\nExact local diagnostics: data/wr2_world_resistance.log\\nNo data leaves your computer.	true
+message_event_text_text_wr2_wr_status_100	World Resistance has reached maximum pressure.\\n\\nResistance tier: 100 - Total Resistance. Every active AI faction receives the maximum package; AI-to-AI peace protection and legal trade attempts are active worldwide.\\n\\nExact local diagnostics: data/wr2_world_resistance.log\\nNo data leaves your computer.	true
+message_event_strings_title_custom_event_23182000rom_Barbarian	WORLD RESISTANCE ACTIVE - TIER 0	true
+message_event_strings_title_custom_event_23182000rom_Eastern	WORLD RESISTANCE ACTIVE - TIER 0	true
+message_event_strings_title_custom_event_23182000rom_Hellenistic	WORLD RESISTANCE ACTIVE - TIER 0	true
+message_event_strings_title_custom_event_23182000rom_Roman	WORLD RESISTANCE ACTIVE - TIER 0	true
+message_event_strings_title_custom_event_23182001rom_Barbarian	WORLD RESISTANCE - TIER 20	true
+message_event_strings_title_custom_event_23182001rom_Eastern	WORLD RESISTANCE - TIER 20	true
+message_event_strings_title_custom_event_23182001rom_Hellenistic	WORLD RESISTANCE - TIER 20	true
+message_event_strings_title_custom_event_23182001rom_Roman	WORLD RESISTANCE - TIER 20	true
+message_event_strings_title_custom_event_23182002rom_Barbarian	WORLD RESISTANCE - TIER 40	true
+message_event_strings_title_custom_event_23182002rom_Eastern	WORLD RESISTANCE - TIER 40	true
+message_event_strings_title_custom_event_23182002rom_Hellenistic	WORLD RESISTANCE - TIER 40	true
+message_event_strings_title_custom_event_23182002rom_Roman	WORLD RESISTANCE - TIER 40	true
+message_event_strings_title_custom_event_23182003rom_Barbarian	WORLD RESISTANCE - TIER 65	true
+message_event_strings_title_custom_event_23182003rom_Eastern	WORLD RESISTANCE - TIER 65	true
+message_event_strings_title_custom_event_23182003rom_Hellenistic	WORLD RESISTANCE - TIER 65	true
+message_event_strings_title_custom_event_23182003rom_Roman	WORLD RESISTANCE - TIER 65	true
+message_event_strings_title_custom_event_23182004rom_Barbarian	WORLD RESISTANCE - TIER 85	true
+message_event_strings_title_custom_event_23182004rom_Eastern	WORLD RESISTANCE - TIER 85	true
+message_event_strings_title_custom_event_23182004rom_Hellenistic	WORLD RESISTANCE - TIER 85	true
+message_event_strings_title_custom_event_23182004rom_Roman	WORLD RESISTANCE - TIER 85	true
+message_event_strings_title_custom_event_23182005rom_Barbarian	WORLD RESISTANCE - TIER 100	true
+message_event_strings_title_custom_event_23182005rom_Eastern	WORLD RESISTANCE - TIER 100	true
+message_event_strings_title_custom_event_23182005rom_Hellenistic	WORLD RESISTANCE - TIER 100	true
+message_event_strings_title_custom_event_23182005rom_Roman	WORLD RESISTANCE - TIER 100	true

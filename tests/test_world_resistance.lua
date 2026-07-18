@@ -116,4 +116,19 @@ for i = 1, #pairs do
     assert_true(pairs[i].a.active and pairs[i].b.active, "pair contains only active factions")
 end
 
+-- Structured telemetry has a fixed prefix/order and sanitizes delimiters so a
+-- faction or engine error cannot forge an extra field or log line.
+local telemetry = WR.telemetry_line("STATE", {
+    { "unsafe", "alpha|beta\ngamma\tdelta" },
+    { "number", 42 }
+})
+assert_true(
+    string.find(telemetry, "WR2|schema=1|event=STATE|release=0.1.1-beta|director=3", 1, true) == 1,
+    "telemetry prefix is versioned and deterministic"
+)
+assert_true(
+    string.find(telemetry, "|unsafe=alpha beta gamma delta|number=42", 1, true) ~= nil,
+    "telemetry values are delimiter-safe"
+)
+
 print("World Resistance simulation: " .. tostring(tests_run) .. " assertions passed")

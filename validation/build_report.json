@@ -1,35 +1,41 @@
 {
-  "build_tool_version": "1.0.0",
+  "build_tool_version": "1.1.0",
   "final_pack": {
     "dependency_count": 0,
-    "file_count": 5,
-    "file_index_size": 242,
+    "file_count": 8,
+    "file_index_size": 386,
     "file_type": 3,
     "flags": 0,
     "format": "PFH4",
-    "pack_size": 59579,
+    "pack_size": 85539,
     "paths": [
       "db/effect_bundles_tables/wr2_world_resistance",
       "db/effect_bundles_to_effects_junctions_tables/wr2_world_resistance",
       "db/fame_levels_tables/wr2_world_resistance",
+      "db/message_event_strings_tables/wr2_world_resistance",
+      "db/message_events_tables/wr2_world_resistance",
       "lua_scripts/all_scripted.lua",
-      "lua_scripts/wr2_world_resistance.lua"
+      "lua_scripts/wr2_world_resistance.lua",
+      "text/db/wr2_world_resistance.loc"
     ],
-    "sha256": "0fff2492ac82259d14d94eeda08a7768ec6c703f868dfdb92296b779959cf01b",
+    "sha256": "9ca3cf59de7d1851110994917b43a777b46f5adf05c7b61e274439669fbada4e",
     "timestamp": 0,
     "valid": true
   },
   "inputs": {
     "fame_tsv_sha256": "6247489e644f60826e91bf38303b4dd7570bda247addb1e8f2351b0103fbfe78",
+    "localisation_tsv_sha256": "91012e2e80d8f5aee238175ed4ae0be354077d4f43d2b530cb463e17a076dc52",
     "lua_sha256": {
-      "lua_scripts/all_scripted.lua": "9651ad12ece2a17d80821332d7e51c1b658986abceac3ed93f022dd2d33ccd9f",
-      "lua_scripts/wr2_world_resistance.lua": "282892ec28bc92ee4c057f4a7dc7ce8fa88e57e1b009e62d7add9f94dce5a0f6"
+      "lua_scripts/all_scripted.lua": "ab564ad1d1825f5af54d62bd3726e4161052243b114c996b3287707566148f76",
+      "lua_scripts/wr2_world_resistance.lua": "84204f96c5b754b9f74c8beaebc8cf45a6f7b823358b59ebd5c3e998c31823f6"
     },
     "matrix_csv_sha256": "337a4e30ce7258b5efb8e110ba36e66bee30e8d6604b05b0027b5a79e17ba7aa",
     "matrix_json_sha256": "12526c2102d85cbda2a9f5e73dbb6a6b96f067f15867c07dd76fbf07e838dff7",
+    "message_event_strings_tsv_sha256": "d4b9aa784b28491102a91cd1afffda344d1845ed83563e761b75e34a8caac110",
+    "message_events_tsv_sha256": "61f8edbb013be27ebc8bd43298d6a99c1466ce917d1fd1eae2aa65a12c296c75",
     "schema_sha256": "cbdb4f74265958ea77da2789e15093c7d12c441a7660cf95cba09e3cf5d6eecf"
   },
-  "release_version": "0.1.0-beta",
+  "release_version": "0.1.1-beta",
   "rpfm_encode": {
     "container": {
       "bitmask": "",
@@ -98,7 +104,10 @@
     "exports": {
       "effect_bundles": "effect_bundles.tsv",
       "effect_bundles_to_effects": "effect_bundles_to_effects.tsv",
-      "fame_levels": "fame_levels.tsv"
+      "fame_levels": "fame_levels.tsv",
+      "localisation": "wr2_world_resistance.loc.tsv",
+      "message_event_strings": "message_event_strings.tsv",
+      "message_events": "message_events.tsv"
     },
     "game_selection": {
       "CompressionFormatDependenciesInfo": [
@@ -110,8 +119,11 @@
       "db/effect_bundles_tables/wr2_world_resistance",
       "db/effect_bundles_to_effects_junctions_tables/wr2_world_resistance",
       "db/fame_levels_tables/wr2_world_resistance",
+      "db/message_event_strings_tables/wr2_world_resistance",
+      "db/message_events_tables/wr2_world_resistance",
       "lua_scripts/all_scripted.lua",
-      "lua_scripts/wr2_world_resistance.lua"
+      "lua_scripts/wr2_world_resistance.lua",
+      "text/db/wr2_world_resistance.loc"
     ],
     "unexpected_diagnostics": []
   },
@@ -143,6 +155,14 @@
       16
     ],
     "bundle_effect_rows": 162,
+    "custom_event_keys": [
+      "custom_event_23182000",
+      "custom_event_23182001",
+      "custom_event_23182002",
+      "custom_event_23182003",
+      "custom_event_23182004",
+      "custom_event_23182005"
+    ],
     "effect_bundle_rows": 9,
     "effect_count": 21,
     "fame_rows": 8,
@@ -156,6 +176,15 @@
       84,
       112
     ],
+    "localisation_rows": 30,
+    "message_event_cultures": [
+      "rom_Barbarian",
+      "rom_Eastern",
+      "rom_Hellenistic",
+      "rom_Roman"
+    ],
+    "message_event_rows": 6,
+    "message_event_string_rows": 24,
     "unique_fame_keys": 8,
     "zero_effect_rows": 0
   }

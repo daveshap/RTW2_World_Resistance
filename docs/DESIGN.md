@@ -155,12 +155,24 @@ The design can guarantee repeated peace enforcement through the audited ordinary
 
 Pair work is processed in bounded batches—80 pairs at first tick and human turns, 20 on AI turns—to avoid a large full-map diplomacy burst on the loading screen.
 
+## Observability
+
+The director provides two independent proofs of life without modifying Rome II's UI component tree:
+
+1. A supported custom message event appears after the first successful reconciliation and whenever the effective base tier reaches a new campaign high. The saved `highest_notified_tier` is monotonic, preventing reload or demotion spam and matching diplomacy's own high-water behavior.
+2. Structured, local-only diagnostics append to `data/wr2_world_resistance.log`. A `STATE` line records the human inputs, computed pressure, effective/desired tiers, active-AI and catch-up counts, command-acceptance counts, treasury grants, diplomacy backlog, and peace commands once per human turn.
+
+A detailed `AI` block is written at session start, tier escalation, and every tenth turn. Each active non-human appears once with its regions, armies, navy count, treasury target/grant, catch-up level, selected bundle keys, and whether the corresponding protected engine commands completed without a Lua exception. The engine exposes no audited effect-bundle readback query, so `base_command_ok` and `catchup_command_ok` describe command acceptance and the director cache—not an independent query of native faction state.
+
+No network API is used and no diagnostic data leaves the local machine. File access is nonessential and fail-closed; compact session/state records also go to Rome II's native `out.ting` sink.
+
 ## Lifecycle and save behavior
 
-- `LoadingGame` reads five primitive named values and does not mutate the world.
+- `LoadingGame` reads six primitive named values and does not mutate the world.
+- `UICreated` only marks the message UI as available; it cannot show status before a successful reconciliation.
 - `FirstTickAfterWorldCreated` performs the first reconciliation after a new campaign, load, or return from battle.
 - `FactionTurnStart` refreshes pressure, bundles, treasury, and diplomacy.
 - `FactionLeaderDeclaresWar` reasserts hard AI peace for an AI declarer at high pressure.
-- `SavingGame` stores pressure, permanent floor, current tier, demotion counter, and diplomacy high-water mark.
+- `SavingGame` stores pressure, permanent floor, current tier, demotion counter, diplomacy high-water mark, and highest notified tier.
 
 Every bundle family is scrubbed before replacement, human bundles are scrubbed on every full update, and engine-facing calls are protected. Re-running converges on the same intended state.

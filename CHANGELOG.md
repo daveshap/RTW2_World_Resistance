@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.1-beta — 2026-07-18
+
+### Added
+
+- Native Rome II activation/status messages after the first successful reconciliation and at each new resistance-tier high.
+- Saved `highest_notified_tier` state to prevent reload and demotion popup spam.
+- Append-only, local-only `data/wr2_world_resistance.log` diagnostics with versioned `SESSION_START`, `STATE`, `AI_AUDIT`, `AI`, `UI_NOTICE`, and `AI_WAR_SUPPRESSED` records.
+- Per-AI audit fields for selected bundles, catch-up level, treasury target/grant, force/region counts, and protected command-acceptance status.
+- RPFM-encoded and round-tripped `message_events`, `message_event_strings`, and English Loc sources using proven vanilla UI assets.
+
+### Fixed
+
+- Director and protected-loader logging now call Rome II's actual `out.ting()` table method instead of treating `out` as a function or relying only on `print`.
+- Structured `STATE` output is deduplicated to once per human turn.
+- File logging fails closed if `io` or game-directory write access is unavailable and cannot interrupt campaign mutation.
+
+### Validation
+
+- Expanded lifecycle simulations cover UI-before-world ordering, read-only loading, saved popup deduplication, tier escalation, native traces, and denied file writes.
+- Pack contract expanded deterministically from five to eight files; all new DB and Loc rows are reopened, exported, and compared through RPFM.
+
 ## 0.1.0-beta — 2026-07-18
 
 First pre-PANTHEON Grand Campaign build.

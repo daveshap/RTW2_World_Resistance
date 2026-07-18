@@ -10,6 +10,9 @@ ROOT = Path(__file__).resolve().parents[1]
 MATRIX_JSON = ROOT / "config" / "bundle_matrix.json"
 MATRIX_CSV = ROOT / "config" / "bundle_matrix.csv"
 FAME_TSV = ROOT / "db_src" / "fame_levels.tsv"
+MESSAGE_EVENTS_TSV = ROOT / "db_src" / "message_events.tsv"
+MESSAGE_EVENT_STRINGS_TSV = ROOT / "db_src" / "message_event_strings.tsv"
+LOCALISATION_TSV = ROOT / "db_src" / "wr2_world_resistance.loc.tsv"
 
 
 EXPECTED_EFFECT_SCOPE = {
@@ -140,6 +143,79 @@ class FameLevelTests(unittest.TestCase):
             [-7, -6, -5, -4, -3, -2, -1, 0],
         )
         self.assertEqual(int(self.rows[-1]["army_cap"]), 16)
+
+
+class ObservabilitySourceTests(unittest.TestCase):
+    @staticmethod
+    def _rows(path: Path) -> list[dict[str, str]]:
+        with path.open(newline="", encoding="utf-8") as source:
+            return list(
+                csv.DictReader(
+                    (line for line in source if not line.startswith("#")),
+                    delimiter="\t",
+                )
+            )
+
+    def test_six_unique_numeric_custom_events(self) -> None:
+        rows = self._rows(MESSAGE_EVENTS_TSV)
+        self.assertEqual(len(rows), 6)
+        keys = [row["event"] for row in rows]
+        self.assertEqual(len(keys), len(set(keys)))
+        self.assertEqual(keys, [f"custom_event_2318200{index}" for index in range(6)])
+        for row in rows:
+            self.assertTrue(row["event"].removeprefix("custom_event_").isdigit())
+            self.assertEqual(row["instant_open"], "true")
+            self.assertEqual(row["layout"], "standard")
+            self.assertEqual(row["requires_response"], "true")
+            self.assertEqual(row["priority"], "100")
+
+    def test_message_strings_cover_every_supported_culture(self) -> None:
+        rows = self._rows(MESSAGE_EVENT_STRINGS_TSV)
+        self.assertEqual(len(rows), 24)
+        cultures = {
+            "rom_Barbarian",
+            "rom_Eastern",
+            "rom_Hellenistic",
+            "rom_Roman",
+        }
+        events = {f"custom_event_2318200{index}" for index in range(6)}
+        self.assertEqual({row["event"] for row in rows}, events)
+        for event in events:
+            self.assertEqual(
+                {row["culture"] for row in rows if row["event"] == event},
+                cultures,
+            )
+        composite = {
+            (
+                row["event"],
+                row["optional_campaign_key"],
+                row["culture"],
+                row["optional_subculture"],
+            )
+            for row in rows
+        }
+        self.assertEqual(len(composite), 24)
+
+    def test_localisation_closes_all_title_and_body_references(self) -> None:
+        strings = self._rows(MESSAGE_EVENT_STRINGS_TSV)
+        loc = self._rows(LOCALISATION_TSV)
+        self.assertEqual(len(loc), 30)
+        loc_by_key = {row["key"]: row for row in loc}
+        self.assertEqual(len(loc_by_key), 30)
+        for row in strings:
+            title_key = (
+                "message_event_strings_title_"
+                + row["event"]
+                + row["optional_campaign_key"]
+                + row["culture"]
+                + row["optional_subculture"]
+            )
+            body_key = "message_event_text_text_" + row["text"]
+            self.assertIn(title_key, loc_by_key)
+            self.assertIn(body_key, loc_by_key)
+        for row in loc:
+            self.assertEqual(row["tooltip"], "true")
+            self.assertTrue(row["text"])
 
 
 if __name__ == "__main__":

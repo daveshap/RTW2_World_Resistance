@@ -10,7 +10,7 @@ This beta is deliberately engineered to minimize the most common startup and cam
 
 - One PFH4 mod pack; no movie pack, DLL, executable patch, startpos, or external runtime dependency.
 - Unique `wr2_wr_` bundle and table namespaces.
-- A small DB surface: custom effect-bundle rows plus a narrow Grand Campaign fame-level override.
+- A small DB surface: custom effect-bundle rows, a narrow Grand Campaign fame-level override, and additive status-message rows/localization.
 - Existing Rome II effect and scope keys only; no invented effect, bonus-value ID, or campaign scope.
 - No copied `effects`, building, technology, difficulty, CAI personality, or startpos tables.
 - RPFM-schema encoding and round-trip/static pack validation rather than guessed binary DB output.
@@ -27,11 +27,17 @@ World mutation is deferred until `FirstTickAfterWorldCreated`. `LoadingGame` onl
 
 Every interface read and engine call is protected and fails closed for that target. Invalid faction keys and dormant zero-region/zero-force records are ignored. Diplomacy has an independent AI-only guard immediately before each pair call.
 
+The status UI uses Rome II's documented `show_message_event(event_key, x, y)` path and proven vanilla message assets. It does not construct, search, divorce, replace, or patch UI components. The call waits for both `UICreated` and a successful world reconciliation, is protected, and is never made from `LoadingGame`.
+
+Local diagnostics use append-only `io.open` access to `data/wr2_world_resistance.log`. Open, write, flush, and close are all protected. The first failure permanently disables that file sink for the Lua session while the campaign director and native `out.ting` logging continue.
+
 ## Performance safeguards
 
 Pairwise diplomacy is potentially quadratic when many factions survive. The director processes at most 80 previously unreconciled pairs on the first tick or a human turn and 20 on an AI turn. Work resumes on later callbacks instead of issuing thousands of commands on one loading frame.
 
 War-declaration handling resolves only the declaring AI and compares it with the active AI list. It does not run a full all-pairs audit inside the event.
+
+Structured `STATE` output is limited to once per human turn. Detailed per-AI audits run only at session start, at a new tier high, and every tenth turn; pair-by-pair diplomacy is never written to the local file.
 
 The script does not create forces. Force spawning, especially in invalid or occupied locations, is a known source of campaign instability and turn-sequence freezes. AI army parity is pursued through legal cap access, money, recruitment slots, rank, replenishment, and low costs.
 
@@ -69,6 +75,8 @@ These findings shaped the clean-test requirement, minimal DB surface, protected 
 6. **Scripted wars.** Campaign incidents can potentially bypass ordinary treaty permissions; repeated peace enforcement should close them but needs observation.
 7. **Loader ownership.** Another enabled mod that replaces `all_scripted.lua` can silently prevent one director from loading or can remove vanilla imports.
 8. **PANTHEON/JUPITER.** New official rules may invalidate campaign, schema, Imperium, and army-cap assumptions.
+9. **Message localization.** The additive Loc file is English and covers the four proven Rome II culture keys. Other client languages need a live display test; missing text should be cosmetic, but has not been observed here.
+10. **Local file permissions.** A protected game install may reject `data/wr2_world_resistance.log`. This is designed to disable diagnostics rather than gameplay, but the live fallback behavior still needs observation.
 
 ## Recovery if a test fails
 
