@@ -1,3 +1,6 @@
+![World Resistance Banner](banner.jpg)
+
+
 # World Resistance for Total War: ROME II
 
 World Resistance is a standalone anti-steamroll campaign mod. As the human empire grows, **every active AI faction** receives stronger economic, military, research, stability, and diplomatic support. War status, alliance status, client status, diplomatic contact, culture, and distance do not affect eligibility.
