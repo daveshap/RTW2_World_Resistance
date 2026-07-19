@@ -55,6 +55,12 @@ local function make_force()
         end,
         is_navy = function(_self)
             return false
+        end,
+        has_general = function(_self)
+            return true
+        end,
+        unit_list = function(_self)
+            return list({})
         end
     }
 end
@@ -258,6 +264,10 @@ local function new_scenario(options)
                     return nil, "simulated diagnostic permission denial"
                 end
                 return {
+                    read = function(_file, format)
+                        assert_true(format == "*a", "diagnostic scan reads the complete file")
+                        return ""
+                    end,
                     write = function(_file, _value) end,
                     flush = function(_file) end,
                     close = function(_file) end
@@ -345,7 +355,14 @@ assert_true(
     recovery.diagnostic_opens[1].path == "data/wr2_world_resistance.log",
     "detailed telemetry opens the configured relative path"
 )
-assert_true(recovery.diagnostic_opens[1].mode == "a", "detailed telemetry opens in append mode")
+assert_true(recovery.diagnostic_opens[1].mode == "r", "detailed telemetry scans before appending")
+local saw_append = false
+for i = 1, #recovery.diagnostic_opens do
+    if recovery.diagnostic_opens[i].mode == "a" then
+        saw_append = true
+    end
+end
+assert_true(saw_append, "detailed telemetry opens in append mode after the bounded scan")
 recovery:assert_campaign_predicate_calls()
 
 -- A present model with no campaign world is a probe failure, not an

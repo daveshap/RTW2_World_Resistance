@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Build the Lua-only World Resistance 0.1.5 hotfix from the verified v0.1.1 pack.
+"""Build the Lua-only World Resistance 0.1.6 hotfix from the verified v0.1.1 pack.
 
-The 0.1.5 release keeps the explicit 0.1.4 event-registry setup and corrects
-Rome II's campaign_name(key) boolean-predicate call plus world diagnostics.
+The 0.1.6 release keeps the verified DB/Loc payloads while correcting field-
+army telemetry, adding region-proportional mobilization goals, strengthening
+AI-only strategic cooperation, and bounding local diagnostic logs.
 Its five RPFM-encoded DB tables and Loc payload are copied byte-for-byte from
 the v0.1.1 pack that was already encoded, reopened, exported, and compared
 with source under RPFM 5.0.5. This builder refuses to run unless the complete
@@ -47,11 +48,11 @@ except ImportError:
     from pfh4 import PackFormatError, read_pack, validate_pack, write_pack_file
 
 
-BUILD_TOOL_VERSION = "1.5.0-hotfix"
-RELEASE_VERSION = "0.1.5-beta"
+BUILD_TOOL_VERSION = "1.6.0-hotfix"
+RELEASE_VERSION = "0.1.6-beta"
 BASE_RELEASE_VERSION = "0.1.1-beta"
 BASE_PACK_SHA256 = "9ca3cf59de7d1851110994917b43a777b46f5adf05c7b61e274439669fbada4e"
-DIRECTOR_VERSION = 7
+DIRECTOR_VERSION = 8
 TELEMETRY_SCHEMA = 1
 PACK_FILENAME = "@wr2_world_resistance.pack"
 BOOTSTRAP_LOG_PATH = "wr2_world_resistance_bootstrap.log"
@@ -193,6 +194,8 @@ def build(
             "telemetry_schema": TELEMETRY_SCHEMA,
             "bootstrap_log_path": BOOTSTRAP_LOG_PATH,
             "diagnostic_log_path": DIAGNOSTIC_LOG_PATH,
+            "diagnostic_log_max_lines": 1000,
+            "diagnostic_log_keep_lines": 800,
             "director_module_path": FINAL_DIRECTOR_PATH,
             "director_require_name": "wr2_world_resistance",
             "listener_registration": "explicit_loader_setup_with_exported_registry",
@@ -203,6 +206,10 @@ def build(
             "initialization_event": "FirstTickAfterWorldCreated",
             "initialization_retry": "first_FactionTurnStart_each_campaign_turn",
             "world_diagnostics": "reasoned_bootstrap_state_and_sink_status",
+            "army_measurement": "general_led_land_forces_only",
+            "ai_army_goal": "min_four_per_region_human_parity_sixteen",
+            "ai_cooperation": "pair_scoped_best_friends_lock_at_tier_85",
+            "visible_attitude_mutation": "read_only_telemetry_no_unsafe_global_bonus",
         },
         "inputs": current_inputs,
         "validated_contract": prior["validated_contract"],

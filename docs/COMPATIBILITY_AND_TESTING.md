@@ -7,7 +7,7 @@
 | Current public pre-PANTHEON Rome II | Targeted |
 | Grand Campaign (`main_rome`) | Targeted |
 | New single-player campaign | Strongly recommended |
-| Existing save | Not certified |
+| Existing original Grand Campaign save | 0.1.5 activation/reconciliation confirmed in one live save; balance and retroactive AI development are not certified |
 | Multiplayer / co-op | Defensive handling exists, but balance and lifecycle are unsupported |
 | DLC and mini-campaigns | Unsupported; the director becomes inert outside `main_rome` |
 | PANTHEON/JUPITER branch | Unsupported; requires a separate build |
@@ -15,6 +15,8 @@
 Creative Assembly has announced that PANTHEON will change Rome II over a series of updates, and JUPITER specifically revisits buildings and army/navy/agent-cap sources. This release intentionally targets the public pre-PANTHEON rules rather than guessing at an unreleased final cap model. Its `fame_levels` table uses the backward-compatible v4 Grand Campaign row shape verified in decoded stable packs. RPFM also knows later table layouts, but those definitions predate the PANTHEON announcement and are not labelled here as future formats.
 
 The installable filename is `@wr2_world_resistance.pack`. The leading `@` is intentional: it improves recognition of a manually installed local pack by the current Rome II launcher. Remove or disable the old unprefixed `wr2_world_resistance.pack`; keeping both copies makes it impossible to know which release the launcher selected.
+
+The standalone `.pack` beside the release archive and the copy under the archive's `dist/` directory are the same installable artifact and must have the same SHA-256 recorded in the final validation report. No companion pack is required. If those hashes differ, do not guess which one is newer; preserve the files and report the mismatch.
 
 ## Compatibility matrix
 
@@ -32,11 +34,11 @@ World Resistance is self-contained in one pack and needs no framework or compani
 | Total campaign overhaul | Unsupported | Campaign key, region count, DB rows, and loader assumptions may differ |
 | Startpos or force-spawning mod | Unsupported combination | Harder to isolate lifecycle and cap failures |
 
-Rome II's `all_scripted.lua` does not have a safe automatic multi-mod append mechanism. A compatibility patch must preserve the seven vanilla imports, assign `events = triggers.events`, and protected-load both mods after that assignment. World Resistance 0.1.5 must also receive the exact shared registry through `director.setup(triggers.events)`; merely assigning an `events` global is not a verified cross-module handoff.
+Rome II's `all_scripted.lua` does not have a safe automatic multi-mod append mechanism. A compatibility patch must preserve the seven vanilla imports, assign `events = triggers.events`, and protected-load both mods after that assignment. World Resistance 0.1.6 must also receive the exact shared registry through `director.setup(triggers.events)`; merely assigning an `events` global is not a verified cross-module handoff.
 
 The inspected Stable Politics presets do not replace `all_scripted.lua` and do not share a primary key with World Resistance. Their relative launcher order should therefore be immaterial. Complete the World Resistance-only smoke test first, then enable exactly one Stable Politics preset and repeat the first-turn/end-turn check; this remains a compatibility expectation until both packs have been exercised together in a live Rome II installation.
 
-## 0.1.1–0.1.4 activation defects and 0.1.5 repair
+## Activation history and 0.1.6 baseline
 
 Release 0.1.1 imported the director before Rome II had exposed `scripting.game_interface`. When the interface was absent, the adapter returned without registering its campaign listeners and had no retry path. That made the mod silent and mechanically inert on both a new campaign and a loaded campaign. Starting a new campaign could not repair that defect.
 
@@ -50,7 +52,9 @@ The 0.1.4 director nevertheless stopped at `WORLD_WAIT`. Rome II's model API exp
 
 Release 0.1.5 calls `model:campaign_name("main_rome")`, keeps `LoadingGame` read-only, and retains `FirstTickAfterWorldCreated` as the normal activation edge. If initialization is still incomplete, the first delivered `FactionTurnStart` in each campaign turn retries regardless of that context faction's human/AI status; the complete world scan performs supported-campaign detection, finds the human, and enforces human isolation. This avoids requiring the first retry context to be recognized as human before the world has initialized.
 
-The regression simulations isolate the director from a global `events` value, verify that the exact `triggers.events` argument receives all six callbacks, and cover repeated setup, partial registration, retry without duplicates, delayed-interface recovery, the existing-save path, the `campaign_name("main_rome")` predicate, and per-turn faction-turn recovery. These are simulated control-flow checks. The 0.1.4 trace is native evidence for routing, attachment, dispatch, and interface acquisition; 0.1.5 still needs native evidence for successful world reconciliation and effects.
+The later 0.1.5 live run closes the activation gap: a loaded maximum-pressure original Grand Campaign reaches `WORLD_STATE`, `WORLD_READY`, `DIAGNOSTIC_SINK_READY`, `SESSION_START`, `STATE`, and complete AI/pair audits. Every active AI receives Tier 100 plus Catch-up 3 in that save, all 91 surviving AI pairs are processed, treasury support repeats as needed, and the activation popup stays deduplicated after a full exit/reload/turn advance.
+
+Release 0.1.6 preserves that live-proven activation path. It changes army measurement to general-led field armies, adds a `min(4 × regions, human parity target, 16)` mobilization goal, hard-locks both directions of every processed AI pair to `BEST_FRIENDS` at Tier 85+, adds attitude/stance/mobilization audits, and bounds both logs. It does not add DB effects, roster unlocks, force spawning, or CAI budget/personality overrides.
 
 ## Why Normal campaign difficulty is the initial target
 
@@ -58,7 +62,7 @@ World Resistance caps its own construction, recruitment, upkeep, and mercenary r
 
 The database accepts a finite value below `-100`, but that does not establish safe economic behavior. Start on Normal. Harder campaign difficulties must be tested for zero/negative prices and unexpected payments before being recommended.
 
-## Verification completed without the game
+## Build-environment checks and supplied live evidence
 
 The source was designed and checked against:
 
@@ -70,7 +74,7 @@ The source was designed and checked against:
 - Lua 5.1 syntax and pure/mocked simulations, including no-interface import, delayed interface publication, first-faction-turn-per-campaign-turn recovery, all-faction eligibility, and the no-human-diplomacy invariant;
 - deterministic PFH4 structure tests and pack round-trip tooling.
 
-These checks reduce guessed-key and malformed-pack risk. The user's 0.1.4 trace adds native proof of loader selection, listener attachment, event dispatch, and interface acquisition, but not successful scaling. This environment does not contain the paid Rome II data depot, Assembly Kit dependency cache, or a runnable Rome II executable, so this beta has **not** completed a successful native world reconciliation, effect verification, end-turn sequence, battle return, or soak test.
+These checks reduce guessed-key and malformed-pack risk. The user's 0.1.4 trace supplies native proof of loader selection, listener attachment, event dispatch, and interface acquisition. The later 0.1.5 bootstrap and detailed traces supply native proof of a successful maximum-pressure world reconciliation, protected bundle/treasury command processing, complete pair traversal, one-time popup behavior, a full exit/reload, and a later turn. The build environment still lacks the paid Rome II data depot, Assembly Kit dependency cache, and runnable executable, and the live run does not certify elite roster choices, final-city development, alliance frequency, the corrected 0.1.6 field-army counts, or a long high-pressure soak.
 
 Treat any generated validation report as structural evidence, not an in-game certification.
 
@@ -82,19 +86,19 @@ Use a disposable profile or backed-up saves. Test with no other mods before comb
 2. Put `@wr2_world_resistance.pack` in `data` and enable only that pack.
 3. Cold-start to the main menu. A failure before the menu points first to pack/schema/loader conflicts.
 4. Start a new original Grand Campaign and reach the first human turn.
-5. Open `wr2_world_resistance_bootstrap.log` in the Rome II installation root, one directory above `data`. For release 0.1.5, one load ID must contain `LOADER_START`, loader-owned `EVENT_REGISTRY_READY` with detail `source=export_triggers`, `MODULE_PATH_READY`, `DIRECTOR_ROUTE_TRY`, `DIRECTOR_ROUTE_OK`, `DIRECTOR_REQUIRE_OK`, `DIRECTOR_SETUP_TRY`, director-owned `EVENT_REGISTRY_READY` with detail `source=loader_argument`, all six `LISTENER_OK_*` stages, `LISTENERS_READY`, and `DIRECTOR_SETUP_OK`. The opaque `registry=` identity in the two ready lines must match. After campaign dispatch begins it must also reach an `EVENT_HIT_*`, `ENGINE_READY`, `WORLD_ATTEMPT`, `WORLD_STATE`, and `WORLD_READY`. An early `ENGINE_WAIT|detail=director_setup` is expected when `all_scripted.lua` precedes the campaign interface; it is only a failure if no later event reaches `ENGINE_READY`.
+5. Open `wr2_world_resistance_bootstrap.log` in the Rome II installation root, one directory above `data`. For release 0.1.6, one load ID must contain `LOADER_START`, loader-owned `EVENT_REGISTRY_READY` with detail `source=export_triggers`, `MODULE_PATH_READY`, `DIRECTOR_ROUTE_TRY`, `DIRECTOR_ROUTE_OK`, `DIRECTOR_REQUIRE_OK`, `DIRECTOR_SETUP_TRY`, director-owned `EVENT_REGISTRY_READY` with detail `source=loader_argument`, all six `LISTENER_OK_*` stages, `LISTENERS_READY`, and `DIRECTOR_SETUP_OK`. The opaque `registry=` identity in the two ready lines must match. After campaign dispatch begins it must also reach an `EVENT_HIT_*`, `ENGINE_READY`, `WORLD_ATTEMPT`, `WORLD_STATE`, and `WORLD_READY`. An early `ENGINE_WAIT|detail=director_setup` is expected when `all_scripted.lua` precedes the campaign interface; it is only a failure if no later event reaches `ENGINE_READY`.
 6. Confirm a **WORLD RESISTANCE ACTIVE** message appears only after the campaign map finishes reconciling.
-7. Confirm the same bootstrap block contains `DIAGNOSTIC_SINK_READY`, then open `data/wr2_world_resistance.log`. Confirm it contains one `SESSION_START`, one `STATE`, and an `AI_AUDIT_BEGIN`/`AI`/`AI_AUDIT_END` block for the current turn. This detailed file is deliberately not created until a supported world has reconciled successfully. `DIAGNOSTIC_SINK_ERROR` is explicit evidence of a file problem; absence of the detailed file before `WORLD_STATE` is not.
+7. Confirm the same bootstrap block contains `DIAGNOSTIC_SINK_READY`, then open `data/wr2_world_resistance.log`. Confirm it contains one `SESSION_START`, one `STATE`, and an `AI_AUDIT_BEGIN`/`DIPLOMACY_AUDIT`/`AI`/`AI_AUDIT_END` block for the current turn. This detailed file is deliberately not created until a supported world has reconciled successfully. `DIAGNOSTIC_SINK_ERROR` is explicit evidence of a file tracking/path/write problem; absence of the detailed file before `WORLD_STATE` is not.
 8. Confirm the human receives none of the nine `wr2_wr_` bundles and no treasury grant.
 9. In the audit block, inspect several neutral, allied, client, distant, and hostile AI factions. Every active AI should have a base selection; weak ones should have a catch-up selection as well.
-10. Confirm an AI can legally raise armies toward the 16-army cap without any spawned or duplicate force. Do not use the diplomacy power bar as an instant activation test: it reflects forces already fielded, and WR accelerates normal recruitment rather than creating armies.
+10. Confirm `commanded_armies` counts only general-led field forces while `garrison_armies` tracks settlement forces separately. For each AI, verify `army_goal = min(4 × regions, target_armies, 16)`, `army_shortfall` is nonnegative, `army_units` is the total in commanded armies, and `full_armies` counts 20-unit stacks. Then observe whether the AI recruits toward that goal over several turns. The legal fame ceiling remains 16; WR does not dynamically cap or spawn armies.
 11. End at least one full turn and watch for a freeze during the faction sequence. Confirm exactly one new `STATE` line appears for the next human turn.
 12. Save, exit to menu, reload, and verify the acknowledged tier popup does not repeat, bundles do not duplicate, and treasury is not granted repeatedly within one turn.
 13. Enter a battle, return to campaign, and continue an AI turn.
 14. Damage or sabotage a building under construction, then repair, capture, and convert it. Confirm the `-7` construction-turn effect respects a one-turn floor and does not break repair state.
-15. At a disposable high-pressure state, verify a new tier popup, AI-to-AI peace, inability to declare ordinary AI wars, protected agreements, and direct legal trade attempts. Also verify AI can still declare war on and negotiate with the human normally.
+15. At a disposable Tier 85+ state, let the pair backlog reach zero, then verify AI-to-AI peace, inability to declare ordinary AI wars, protected agreements, and `DIPLOMACY_AUDIT` stance-block readback. `best_friend_pair_commands_ok` records accepted block/refresh commands; `stance_blocked_directions` is native readback. At Tier 100, also check direct legal trade attempts and compare `ai_ai_avg` with `ai_human_avg` over scheduled audits. Do not expect or report a numeric `+300`: WR has no safe pair-specific attitude setter. Confirm AI-to-human war and negotiation remain legal.
 16. Test Normal first, then each intended campaign difficulty. Check construction and recruitment prices and upkeep for negative or nonsensical values.
-17. Run at least 20 AI turns at high pressure and inspect the local diagnostics after every save/load and battle return.
+17. Run at least 20 AI turns at high pressure and inspect the local diagnostics after every save/load and battle return. For a rotation test, use copied logs or a disposable run and confirm neither local file exceeds 1,000 lines and the newest history survives the 800-line compaction.
 18. Only after the single-pack test passes, enable one Stable Politics preset and repeat cold load, first turn, and a complete end turn.
 
 ### Exact log interpretation
@@ -121,18 +125,19 @@ Use a disposable profile or backed-up saves. Test with no other mods before comb
 - For one load ID, the bootstrap trace reaches `DIRECTOR_ROUTE_OK`, `DIRECTOR_REQUIRE_OK`, matching loader/director `EVENT_REGISTRY_READY` identities, six successful/reused listener outcomes, `LISTENERS_READY`, `DIRECTOR_SETUP_OK`, an `EVENT_HIT_*`, `ENGINE_READY`, `WORLD_ATTEMPT`, `WORLD_STATE`, and `WORLD_READY`; the detailed trace then reaches `SESSION_START` and `STATE` after first tick or the guarded first-faction-turn-per-campaign-turn retry.
 - The activation/tier message appears after successful reconciliation, never during `LoadingGame`, and an acknowledged tier does not repeat after reload.
 - Each human turn produces at most one structured `STATE`; detailed audits include every active non-human faction exactly once and exclude the human and dormant factions.
+- Both local logs remain at or below 1,000 lines; rotation retains the newest history, and a read/rewrite failure suppresses that file batch without suppressing native telemetry or gameplay.
 - Exactly one base bundle and zero or one catch-up bundle exist on every active AI.
 - No World Resistance bundle, treasury grant, stance promotion, forced treaty, or forced peace touches a human endpoint.
 - Repeated loading and battle return do not accumulate base or catch-up tiers.
-- Every AI with non-negative prestige resolves to the 16-army final row while the human retains its normal cap progression.
-- At Tier 85 or above, ordinary AI-to-AI war/join-war is blocked and existing AI-to-AI wars converge to peace.
+- Every AI with non-negative prestige resolves to the 16-army final row while the human retains its normal cap progression; telemetry uses only general-led armies and computes the per-AI regional goal without force spawning.
+- At Tier 85 or above, ordinary AI-to-AI war/join-war is blocked, existing wars converge to peace, both strategic directions are locked/refreshed to `BEST_FRIENDS`, and native stance-block readback is visible when the API supplies it.
 - The player remains a legal war target; AI-to-human hostility is not disabled.
 - No turn-time freeze occurs while diplomacy pairs are processed in batches.
 - No negative price, money-on-purchase, broken construction, or unrecoverable sabotage state appears.
 
 ## Save and removal guidance
 
-A new campaign is the only supported starting point for this beta. The Lua director is written to reconcile an existing save, but DB cap behavior and already-created AI forces make mid-campaign installation/removal a separate risk.
+A copied existing original Grand Campaign is supported for activation testing: 0.1.5 successfully reconciled one such maximum-pressure save. A new campaign remains the supported **balance** starting point because an existing save cannot retroactively receive earlier research, construction, recruitment, and diplomatic development. Mid-campaign installation/removal also remains a separate DB-cap risk.
 
 Do not remove the pack and then overwrite your only save if an AI may own more armies than the restored cap. Keep a pre-mod save and the exact pack version together. If a test fails, disable the pack, restore the clean save, and report the last safe lifecycle point.
 
@@ -147,6 +152,6 @@ Include:
 - exact `@wr2_world_resistance.pack` filename and SHA-256 from the release report;
 - the last successful step: menu, campaign load, first turn, end turn, save/load, or battle return;
 - the relevant `script_error` or modified log excerpt;
-- all 0.1.5 `BOOT` lines for the same `load=` identifier from installation-root `wr2_world_resistance_bootstrap.log`;
+- all 0.1.6 `BOOT` lines for the same `load=` identifier from installation-root `wr2_world_resistance_bootstrap.log`;
 - the `SESSION_START`, latest `STATE`, and surrounding `AI_AUDIT` lines from `data/wr2_world_resistance.log`;
 - whether the failure reproduces with only World Resistance enabled from a clean process.

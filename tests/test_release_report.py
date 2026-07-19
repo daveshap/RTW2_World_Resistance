@@ -17,7 +17,7 @@ class ReleaseReportTests(unittest.TestCase):
         cls.report = json.loads(REPORT_PATH.read_text(encoding="utf-8"))
 
     def test_release_and_target(self) -> None:
-        self.assertEqual(self.report["release_version"], "0.1.5-beta")
+        self.assertEqual(self.report["release_version"], "0.1.6-beta")
         self.assertEqual(self.report["target"]["game"], "rome_2")
         self.assertEqual(self.report["target"]["campaign"], "main_rome")
 
@@ -38,7 +38,7 @@ class ReleaseReportTests(unittest.TestCase):
     def test_runtime_and_manual_pack_contract(self) -> None:
         runtime = self.report["runtime_contract"]
         self.assertEqual(runtime["pack_filename"], "@wr2_world_resistance.pack")
-        self.assertEqual(runtime["director_version"], 7)
+        self.assertEqual(runtime["director_version"], 8)
         self.assertEqual(runtime["telemetry_schema"], 1)
         self.assertEqual(
             runtime["bootstrap_log_path"], "wr2_world_resistance_bootstrap.log"
@@ -74,6 +74,21 @@ class ReleaseReportTests(unittest.TestCase):
         self.assertEqual(
             runtime["world_diagnostics"],
             "reasoned_bootstrap_state_and_sink_status",
+        )
+        self.assertEqual(runtime["diagnostic_log_max_lines"], 1000)
+        self.assertEqual(runtime["diagnostic_log_keep_lines"], 800)
+        self.assertEqual(runtime["army_measurement"], "general_led_land_forces_only")
+        self.assertEqual(
+            runtime["ai_army_goal"],
+            "min_four_per_region_human_parity_sixteen",
+        )
+        self.assertEqual(
+            runtime["ai_cooperation"],
+            "pair_scoped_best_friends_lock_at_tier_85",
+        )
+        self.assertEqual(
+            runtime["visible_attitude_mutation"],
+            "read_only_telemetry_no_unsafe_global_bonus",
         )
         self.assertEqual(
             sorted(path.name for path in (ROOT / "dist").glob("*.pack")),
@@ -122,7 +137,7 @@ class ReleaseReportTests(unittest.TestCase):
             "DIAGNOSTIC_SINK_ERROR",
         ):
             self.assertIn(milestone, loader + director)
-        self.assertIn('local VERSION = 7', director)
+        self.assertIn('local VERSION = 8', director)
         self.assertIn("return director.setup(event_registry)", loader)
         self.assertIn("WR.setup = setup", director)
         self.assertNotIn('rawget(_G, "events")', director)

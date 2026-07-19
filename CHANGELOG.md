@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.6-beta — 2026-07-19
+
+This is an observability and anti-hegemonic-coordination update built on the first successful native 0.1.5 campaign reconciliation. The live 0.1.5 traces reached `WORLD_STATE`, `WORLD_READY`, `DIAGNOSTIC_SINK_READY`, `SESSION_START`, `STATE`, and complete AI/pair audits; the activation popup appeared once and remained suppressed after a full exit, reload, and subsequent turn. The same run showed every active AI receiving the maximum pressure and catch-up packages, all surviving AI wars being reconciled, and all 91 AI pairs eventually processed.
+
+### Changed
+
+- Corrected army telemetry and parity calculations to count only general-led land forces as deployable field armies. Rome II exposes settlement garrisons through the same broad army list; those garrisons previously inflated the human and AI army signals.
+- Added separate `commanded_armies`, `garrison_armies`, `army_units`, and `full_armies` telemetry. A full army is a general-led field army with at least 20 units.
+- Added a per-faction mobilization goal of `min(4 × regions, human parity target, 16)`. A one-region faction therefore aims for at most four field armies, while a four-region faction can aim for the full 16. This is a comparison and reserve target, not a force-spawn command or a dynamic legal-cap rewrite.
+- Retained the existing Grand Campaign fame override: active AI can legally reach the final 16-army row, while the human keeps the vanilla 3-to-16 progression. The CAI still decides when and where to recruit.
+- At Tier 85 and above, every AI-to-AI direction is now hard-blocked to `CAI_STRATEGIC_STANCE_BEST_FRIENDS` and immediately force-refreshed. Existing protected trade/peace/non-aggression/alliance permissions, break prohibitions, war/join-war blocks, repeated peace enforcement, and Tier 100 legal trade attempts remain in place.
+- Did **not** add a claimed `+300` visible relations modifier. The audited Rome II interface exposes numeric faction attitudes for reading, but no safe pair-specific numeric setter. A global DB diplomacy modifier would also affect relationships with the human and therefore violates the AI-only contract.
+- Added `DIPLOMACY_AUDIT` records with directional AI-to-AI and AI-to-human attitude count/minimum/average/maximum values, stance-block readback counts, accepted best-friend pair-command counts, and total pair counts.
+- Added AI mobilization totals to `STATE` and per-faction goal/shortfall fields to `AI` audit records.
+- Bounded both local log files to 1,000 lines. Rotation keeps the newest 800 lines (or the largest smaller tail that leaves room for the incoming detailed batch). If line tracking or rewrite fails, that file write is skipped; native output and all campaign mechanics continue.
+- Bumped the release/director identifiers to `0.1.6-beta` / `8`.
+
+### Deliberately unchanged
+
+- The Tier 100 and Catch-up 3 economy, research, public-order, food, growth, construction, recruitment, rank, armour, morale, damage, replenishment, and upkeep effects are unchanged.
+- The script does not unlock faction-ineligible units, prescribe elite roster composition, create forces, fill armies, override CAI budgets/personality tables, or rewrite building/technology records. Elite development remains the result of extreme research, construction, recruitment, rank, replenishment, and treasury support acting through normal CAI recruitment.
+- Compatibility remains limited to the current public pre-PANTHEON original Grand Campaign (`main_rome`). The pack is standalone but still conflicts with another `all_scripted.lua` owner, another `fame_levels` override, or a diplomacy/CAI overhaul that controls the same pairs.
+
 ## 0.1.5-beta — 2026-07-19
 
 This is a mandatory world-reconciliation replacement for 0.1.4. The latest native trace proves that 0.1.4 successfully loaded, attached all six callbacks to the exact exported registry, received campaign events, and acquired Rome II's campaign interface. It then stopped at `WORLD_WAIT` before applying a single AI bundle or treasury grant.

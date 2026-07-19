@@ -10,8 +10,8 @@
 --   * World mutation begins at FirstTickAfterWorldCreated, never LoadingGame.
 --   * Save data consists only of primitive values supported by Rome II.
 
-local VERSION = 7
-local RELEASE_VERSION = "0.1.5-beta"
+local VERSION = 8
+local RELEASE_VERSION = "0.1.6-beta"
 local TELEMETRY_SCHEMA = 1
 local GLOBAL_KEY = "WR2_WORLD_RESISTANCE"
 
@@ -48,6 +48,9 @@ WR.config = {
     final_imperium_min_armies = 16,
 
     army_signal_reference = 16,
+    ai_armies_per_region_target = 4,
+    ai_army_goal_cap = 16,
+    full_army_unit_count = 20,
     treasury_signal_reference = 100000,
     army_signal_weight_of_remainder = 0.10,
     treasury_signal_weight_of_remainder = 0.05,
@@ -87,6 +90,7 @@ WR.config = {
     -- because force_diplomacy has no documented "restore vanilla" operation.
     hard_ai_peace_tier = 4,
     force_trade_tier = 5,
+    lock_best_friends_tier = 4,
 
     -- Strategic stance promotion is directional, so it is always applied in
     -- both directions and only after the pair has passed the AI-only guard.
@@ -108,6 +112,8 @@ WR.config = {
     log_each_human_turn = true,
     local_diagnostics_enabled = true,
     diagnostic_log_path = "data/wr2_world_resistance.log",
+    diagnostic_log_max_lines = 1000,
+    diagnostic_log_keep_lines = 800,
     detailed_audit_turn_interval = 10,
 
     -- Rome II requires custom message-event keys to be custom_event_ followed
@@ -219,6 +225,7 @@ end
 
 local diagnostic_sink_disabled = false
 local diagnostic_sink_warning_emitted = false
+local diagnostic_log_line_count = nil
 
 local function telemetry_value(value)
     local text = tostring(value == nil and "" or value)
@@ -247,6 +254,115 @@ end
 
 WR.telemetry_line = telemetry_line
 
+local function split_log_lines(contents)
+    if type(contents) ~= "string" or contents == "" then
+        return {}
+    end
+    local normalized = string.gsub(contents, "\r\n", "\n")
+    normalized = string.gsub(normalized, "\r", "\n")
+    if string.sub(normalized, -1) == "\n" then
+        normalized = string.sub(normalized, 1, -2)
+    end
+    if normalized == "" then
+        return {}
+    end
+
+    local lines = {}
+    local line
+    for line in string.gmatch(normalized .. "\n", "(.-)\n") do
+        table.insert(lines, line)
+    end
+    return lines
+end
+
+local function read_diagnostic_log(io_api)
+    local file, open_error = io_api.open(WR.config.diagnostic_log_path, "r")
+    if file == nil then
+        -- Create a missing first-run file, then require a readable handle so
+        -- line tracking can never guess and append beyond the hard ceiling.
+        local touch, touch_error = io_api.open(WR.config.diagnostic_log_path, "a")
+        if touch == nil then
+            return nil, tostring(touch_error or open_error or "log is unavailable")
+        end
+        pcall(function()
+            touch:close()
+        end)
+        file, open_error = io_api.open(WR.config.diagnostic_log_path, "r")
+        if file == nil then
+            return nil, tostring(open_error or "created log cannot be read")
+        end
+    end
+
+    local read_ok, contents_or_error = pcall(function()
+        return file:read("*a")
+    end)
+    pcall(function()
+        file:close()
+    end)
+    if not read_ok or type(contents_or_error) ~= "string" then
+        return nil, tostring(contents_or_error or "read returned no text")
+    end
+    return split_log_lines(contents_or_error), nil
+end
+
+local function rewrite_diagnostic_log(io_api, lines, incoming_count)
+    local maximum = math.max(tonumber(WR.config.diagnostic_log_max_lines) or 1000, 1)
+    local preferred = math.max(tonumber(WR.config.diagnostic_log_keep_lines) or 800, 0)
+    local retain = math.min(preferred, math.max(maximum - incoming_count, 0), #lines)
+    local first = #lines - retain + 1
+    local file, open_error = io_api.open(WR.config.diagnostic_log_path, "w")
+    if file == nil then
+        return false, tostring(open_error or "rotation open returned nil")
+    end
+
+    local write_ok, write_error = pcall(function()
+        local i
+        for i = first, #lines do
+            file:write(lines[i])
+            file:write("\n")
+        end
+        file:flush()
+    end)
+    local close_ok, close_error = pcall(function()
+        file:close()
+    end)
+    if not write_ok then
+        return false, tostring(write_error)
+    end
+    if not close_ok then
+        return false, tostring(close_error)
+    end
+    diagnostic_log_line_count = retain
+    return true, nil
+end
+
+local function prepare_diagnostic_log(io_api, incoming_count)
+    local maximum = math.max(tonumber(WR.config.diagnostic_log_max_lines) or 1000, 1)
+    if diagnostic_log_line_count == nil then
+        local existing, read_error = read_diagnostic_log(io_api)
+        if existing == nil then
+            -- Native telemetry still runs. Leave the count unknown so a later
+            -- callback can recover instead of writing blindly past the cap.
+            return false, read_error
+        end
+        diagnostic_log_line_count = #existing
+        if diagnostic_log_line_count + incoming_count > maximum then
+            return rewrite_diagnostic_log(io_api, existing, incoming_count)
+        end
+        return true, nil
+    end
+
+    if diagnostic_log_line_count + incoming_count <= maximum then
+        return true, nil
+    end
+
+    local existing, read_error = read_diagnostic_log(io_api)
+    if existing == nil then
+        return false, read_error
+    end
+    return rewrite_diagnostic_log(io_api, existing, incoming_count)
+end
+
 local function append_diagnostic_lines(lines)
     if WR.config.local_diagnostics_enabled ~= true or #lines == 0 then
         return false, nil
@@ -259,6 +375,21 @@ local function append_diagnostic_lines(lines)
     if type(io_api) ~= "table" or type(io_api.open) ~= "function" then
         diagnostic_sink_disabled = true
         return false, "io.open is unavailable"
+    end
+
+    -- If size tracking or compaction is unavailable, skip this file batch.
+    -- Native telemetry and every campaign mutation continue, and the next
+    -- callback retries instead of ever writing blindly beyond 1,000 lines.
+    local preparation_ok, prepared, preparation_error = pcall(
+        prepare_diagnostic_log,
+        io_api,
+        #lines
+    )
+    if not preparation_ok then
+        return false, "bounded log write deferred: " .. tostring(prepared)
+    end
+    if not prepared then
+        return false, "bounded log write deferred: " .. tostring(preparation_error)
     end
 
     local ok, result = pcall(function()
@@ -288,6 +419,7 @@ local function append_diagnostic_lines(lines)
         diagnostic_sink_disabled = true
         return false, tostring(result)
     end
+    diagnostic_log_line_count = (tonumber(diagnostic_log_line_count) or 0) + #lines
     return true, nil
 end
 
@@ -308,7 +440,8 @@ local function emit_telemetry(file_lines, native_lines)
     if failure ~= nil and not diagnostic_sink_warning_emitted then
         diagnostic_sink_warning_emitted = true
         write_native_line(
-            "[WR2 World Resistance] local diagnostics disabled safely: " .. tostring(failure)
+            "[WR2 World Resistance] local diagnostic file batch skipped safely: "
+                .. tostring(failure)
         )
     end
 
@@ -425,10 +558,22 @@ function WR.target_armies(human, permanent_floor, config)
     return human_armies
 end
 
+function WR.ai_army_goal(ai, human, permanent_floor, config)
+    local cfg = config or WR.config
+    local regions = math.max(tonumber(ai.regions) or 0, 0)
+    if regions <= 0 then
+        return 0
+    end
+
+    local regional_goal = regions * cfg.ai_armies_per_region_target
+    local parity_goal = WR.target_armies(human, permanent_floor, cfg)
+    return math.max(math.min(regional_goal, parity_goal, cfg.ai_army_goal_cap), 0)
+end
+
 function WR.catchup_level(ai, human, permanent_floor, config)
     local cfg = config or WR.config
     local target_regions = math.max(tonumber(human.regions) or 0, 1)
-    local target_armies = math.max(WR.target_armies(human, permanent_floor, cfg), 1)
+    local target_armies = math.max(WR.ai_army_goal(ai, human, permanent_floor, cfg), 1)
     local target_treasury = math.max(tonumber(human.treasury) or 0, 5000)
 
     local region_fraction = clamp((tonumber(ai.regions) or 0) / target_regions, 0, 1)
@@ -455,7 +600,7 @@ function WR.treasury_target(ai, human, tier, catchup, permanent_floor, config)
     local tier_index = clamp(tonumber(tier) or 0, 0, #cfg.tiers - 1)
     local catchup_index = clamp(tonumber(catchup) or 0, 0, 3)
     local multiplier = cfg.catchup_treasury_multipliers[catchup_index]
-    local target_armies = WR.target_armies(human, permanent_floor, cfg)
+    local target_armies = WR.ai_army_goal(ai, human, permanent_floor, cfg)
 
     local tier_floor = cfg.tiers[tier_index + 1].treasury_floor * multiplier
     local human_parity = math.max(tonumber(human.treasury) or 0, 0) * multiplier
@@ -571,14 +716,17 @@ local function count_forces(faction)
         return faction:military_force_list()
     end, nil)
     if forces == nil then
-        return 0, 0, 0
+        return 0, 0, 0, 0, 0, 0
     end
 
     local total = safe_read("military_force_list:num_items", function()
         return forces:num_items()
     end, 0)
-    local armies = 0
+    local commanded_armies = 0
+    local garrison_armies = 0
     local navies = 0
+    local army_units = 0
+    local full_armies = 0
     local i
     for i = 0, total - 1 do
         local force = safe_read("military_force_list:item_at", function()
@@ -588,7 +736,32 @@ local function count_forces(faction)
             if safe_read("military_force:is_army", function()
                 return force:is_army()
             end, false) then
-                armies = armies + 1
+                -- Settlement garrisons are exposed as armies too. Only a
+                -- general-led land force consumes an army-cap slot and can be
+                -- compared with the human's deployable field armies.
+                if safe_read("military_force:has_general", function()
+                    return force:has_general()
+                end, false) then
+                    commanded_armies = commanded_armies + 1
+                    local units = safe_read("military_force:unit_list", function()
+                        return force:unit_list()
+                    end, nil)
+                    if units ~= nil then
+                        local unit_count = math.max(safe_read(
+                            "military_force:unit_list:num_items",
+                            function()
+                                return units:num_items()
+                            end,
+                            0
+                        ), 0)
+                        army_units = army_units + unit_count
+                        if unit_count >= WR.config.full_army_unit_count then
+                            full_armies = full_armies + 1
+                        end
+                    end
+                else
+                    garrison_armies = garrison_armies + 1
+                end
             elseif safe_read("military_force:is_navy", function()
                 return force:is_navy()
             end, false) then
@@ -596,7 +769,7 @@ local function count_forces(faction)
             end
         end
     end
-    return total, armies, navies
+    return total, commanded_armies, garrison_armies, navies, army_units, full_armies
 end
 
 local function inspect_faction(faction)
@@ -620,7 +793,7 @@ local function inspect_faction(faction)
             return region_list:num_items()
         end, 0)
     end
-    local forces, armies, navies = count_forces(faction)
+    local forces, armies, garrison_armies, navies, army_units, full_armies = count_forces(faction)
 
     return {
         interface = faction,
@@ -629,7 +802,10 @@ local function inspect_faction(faction)
         regions = math.max(tonumber(regions) or 0, 0),
         forces = math.max(tonumber(forces) or 0, 0),
         armies = math.max(tonumber(armies) or 0, 0),
+        garrison_armies = math.max(tonumber(garrison_armies) or 0, 0),
         navies = math.max(tonumber(navies) or 0, 0),
+        army_units = math.max(tonumber(army_units) or 0, 0),
+        full_armies = math.max(tonumber(full_armies) or 0, 0),
         treasury = safe_read("faction:treasury:" .. key, function()
             return faction:treasury()
         end, 0),
@@ -691,6 +867,9 @@ local function collect_world_stats()
             key = "",
             regions = 0,
             armies = 0,
+            garrison_armies = 0,
+            army_units = 0,
+            full_armies = 0,
             treasury = 0,
             imperium = 0
         },
@@ -736,6 +915,12 @@ local function collect_world_stats()
                         -- Multi-human is unsupported, but max individual
                         -- military/treasury power is safer than summing it.
                         stats.human.armies = math.max(stats.human.armies, metric.armies)
+                        stats.human.garrison_armies = math.max(
+                            stats.human.garrison_armies,
+                            metric.garrison_armies
+                        )
+                        stats.human.army_units = math.max(stats.human.army_units, metric.army_units)
+                        stats.human.full_armies = math.max(stats.human.full_armies, metric.full_armies)
                         stats.human.treasury = math.max(stats.human.treasury, metric.treasury)
                         stats.human.imperium = math.max(stats.human.imperium, metric.imperium)
                     end
@@ -889,6 +1074,11 @@ local function reconcile_faction(ai, stats, grant_treasury)
     local catchup = WR.catchup_level(ai, stats.human, runtime.state.permanent_floor)
     local desired_base = WR.config.tiers[tier + 1].bundle
     local desired_catchup = WR.config.catchup_bundles[catchup]
+    local army_goal = WR.ai_army_goal(
+        ai,
+        stats.human,
+        runtime.state.permanent_floor
+    )
     local treasury_target = WR.treasury_target(
         ai,
         stats.human,
@@ -912,7 +1102,14 @@ local function reconcile_faction(ai, stats, grant_treasury)
     return changes, grant, {
         faction = ai.key,
         regions = ai.regions,
+        imperium = ai.imperium,
+        military_forces = ai.forces,
         armies = ai.armies,
+        garrison_armies = ai.garrison_armies,
+        army_units = ai.army_units,
+        full_armies = ai.full_armies,
+        army_goal = army_goal,
+        army_shortfall = math.max(army_goal - ai.armies, 0),
         navies = ai.navies,
         treasury_before = ai.treasury,
         treasury_target = treasury_target,
@@ -983,6 +1180,41 @@ local function promote_strategic_stance_both(a, b, mode)
 end
 
 
+local function lock_best_friends_stance_both(a, b)
+    if not assert_ai_pair(a, b) then
+        return false
+    end
+    local stance = "CAI_STRATEGIC_STANCE_BEST_FRIENDS"
+    local first_block = safe_engine_call("block_stance:" .. a.key .. ":" .. b.key, function()
+        runtime.game:cai_strategic_stance_manager_block_all_stances_but_that_specified_towards_target_faction(
+            a.key,
+            b.key,
+            stance
+        )
+    end)
+    local first_update = safe_engine_call("force_stance_update:" .. a.key .. ":" .. b.key, function()
+        runtime.game:cai_strategic_stance_manager_force_stance_update_between_factions(
+            a.key,
+            b.key
+        )
+    end)
+    local second_block = safe_engine_call("block_stance:" .. b.key .. ":" .. a.key, function()
+        runtime.game:cai_strategic_stance_manager_block_all_stances_but_that_specified_towards_target_faction(
+            b.key,
+            a.key,
+            stance
+        )
+    end)
+    local second_update = safe_engine_call("force_stance_update:" .. b.key .. ":" .. a.key, function()
+        runtime.game:cai_strategic_stance_manager_force_stance_update_between_factions(
+            b.key,
+            a.key
+        )
+    end)
+    return first_block and first_update and second_block and second_update
+end
+
+
 local function faction_has_any_war(metric)
     return safe_read("faction:at_war:" .. metric.key, function()
         -- Rome II exposes only this no-argument, any-war query.
@@ -1016,9 +1248,10 @@ local function apply_diplomacy_mode(pair, mode)
 
     local calls = 0
     local wars_ended = 0
+    local mode_applied = true
 
     if mode >= 1 then
-        promote_strategic_stance_both(a, b, mode)
+        mode_applied = promote_strategic_stance_both(a, b, mode) and mode_applied
         force_diplomacy_both(a, b, "trade agreement", true, true)
         calls = calls + 4
     end
@@ -1043,6 +1276,12 @@ local function apply_diplomacy_mode(pair, mode)
         if force_ai_peace(a, b) then
             wars_ended = wars_ended + 1
         end
+        -- Refresh the locked cooperative stance after any peace command so
+        -- the CAI immediately evaluates the pair in its post-war state.
+        if mode >= WR.config.lock_best_friends_tier then
+            mode_applied = lock_best_friends_stance_both(a, b) and mode_applied
+            calls = calls + 4
+        end
     end
     if mode >= WR.config.force_trade_tier then
         safe_engine_call("force_make_trade_agreement:" .. a.key .. ":" .. b.key, function()
@@ -1051,8 +1290,12 @@ local function apply_diplomacy_mode(pair, mode)
         calls = calls + 1
     end
 
-    runtime.diplomacy_mode_by_pair[pair.key] = mode
-    return calls, wars_ended
+    if mode_applied then
+        runtime.diplomacy_mode_by_pair[pair.key] = mode
+    else
+        runtime.diplomacy_mode_by_pair[pair.key] = nil
+    end
+    return calls, wars_ended, mode_applied
 end
 
 
@@ -1156,6 +1399,106 @@ local function audit_reason_for_update(stats, previous_tier, options)
 end
 
 
+local function new_numeric_aggregate()
+    return {
+        count = 0,
+        total = 0,
+        minimum = nil,
+        maximum = nil
+    }
+end
+
+
+local function add_numeric_aggregate(aggregate, value)
+    local numeric = tonumber(value)
+    if numeric == nil or numeric ~= numeric then
+        return
+    end
+    aggregate.count = aggregate.count + 1
+    aggregate.total = aggregate.total + numeric
+    if aggregate.minimum == nil or numeric < aggregate.minimum then
+        aggregate.minimum = numeric
+    end
+    if aggregate.maximum == nil or numeric > aggregate.maximum then
+        aggregate.maximum = numeric
+    end
+end
+
+
+local function finish_numeric_aggregate(aggregate)
+    if aggregate.count <= 0 then
+        return {
+            count = 0,
+            minimum = "unavailable",
+            average = "unavailable",
+            maximum = "unavailable"
+        }
+    end
+    return {
+        count = aggregate.count,
+        minimum = aggregate.minimum,
+        average = round(aggregate.total / aggregate.count),
+        maximum = aggregate.maximum
+    }
+end
+
+
+local function collect_attitude_audit(stats)
+    local ai_to_ai = new_numeric_aggregate()
+    local ai_to_human = new_numeric_aggregate()
+    local stance_block_checks = 0
+    local stance_blocked_directions = 0
+    local campaign_ai = safe_read("model:campaign_ai", function()
+        return stats.model:campaign_ai()
+    end, nil)
+    local i, j
+    for i = 1, #stats.ais do
+        local source = stats.ais[i]
+        local attitudes = safe_read("faction:faction_attitudes:" .. source.key, function()
+            return source.interface:faction_attitudes()
+        end, nil)
+        if type(attitudes) == "table" then
+            for j = 1, #stats.ais do
+                local target = stats.ais[j]
+                if target.key ~= source.key then
+                    add_numeric_aggregate(ai_to_ai, attitudes[target.key])
+                    if campaign_ai ~= nil then
+                        local blocked = safe_read(
+                            "campaign_ai:stance_blocked:" .. source.key .. ":" .. target.key,
+                            function()
+                                return campaign_ai:strategic_stance_between_factions_is_being_blocked(
+                                    source.key,
+                                    target.key
+                                )
+                            end,
+                            nil
+                        )
+                        if blocked ~= nil then
+                            stance_block_checks = stance_block_checks + 1
+                            if blocked == true then
+                                stance_blocked_directions = stance_blocked_directions + 1
+                            end
+                        end
+                    end
+                end
+            end
+            for j = 1, #stats.humans do
+                local human = stats.humans[j]
+                if human.active then
+                    add_numeric_aggregate(ai_to_human, attitudes[human.key])
+                end
+            end
+        end
+    end
+    return {
+        ai_to_ai = finish_numeric_aggregate(ai_to_ai),
+        ai_to_human = finish_numeric_aggregate(ai_to_human),
+        stance_block_checks = stance_block_checks,
+        stance_blocked_directions = stance_blocked_directions
+    }
+end
+
+
 local function emit_world_telemetry(stats, summary, faction_audits, audit_reason, options)
     local opts = options or {}
     local file_lines = {}
@@ -1184,7 +1527,10 @@ local function emit_world_telemetry(stats, summary, faction_audits, audit_reason
             { "human_regions", stats.human.regions },
             { "world_regions", stats.total_regions },
             { "map_pct", round(summary.territory_share * 100) },
-            { "armies", stats.human.armies },
+            { "commanded_armies", stats.human.armies },
+            { "garrison_armies", stats.human.garrison_armies },
+            { "army_units", stats.human.army_units },
+            { "full_armies", stats.human.full_armies },
             { "treasury", stats.human.treasury },
             { "imperium", stats.human.imperium },
             { "pressure", summary.pressure },
@@ -1195,6 +1541,10 @@ local function emit_world_telemetry(stats, summary, faction_audits, audit_reason
             { "diplomacy_peak", tier_threshold(summary.diplomacy_peak) },
             { "active_ai", summary.ai_count },
             { "target_armies", summary.target_armies },
+            { "ai_commanded_armies", summary.ai_commanded_armies },
+            { "ai_army_goal", summary.ai_army_goal },
+            { "ai_full_armies", summary.ai_full_armies },
+            { "ai_factions_at_army_goal", summary.ai_factions_at_army_goal },
             { "catchup_0", summary.catchup_counts[1] },
             { "catchup_1", summary.catchup_counts[2] },
             { "catchup_2", summary.catchup_counts[3] },
@@ -1207,6 +1557,7 @@ local function emit_world_telemetry(stats, summary, faction_audits, audit_reason
             { "pairs_total", summary.diplomatic_pairs_total },
             { "pairs_updated", summary.diplomatic_pairs },
             { "pairs_pending", summary.diplomatic_pairs_pending },
+            { "best_friend_pair_commands_ok", summary.best_friend_pair_commands_ok },
             { "diplomatic_calls", summary.diplomatic_calls },
             { "peace_commands", summary.wars_ended }
         })
@@ -1227,6 +1578,25 @@ local function emit_world_telemetry(stats, summary, faction_audits, audit_reason
         table.insert(file_lines, audit_begin)
         table.insert(native_lines, audit_begin)
 
+        local attitudes = collect_attitude_audit(stats)
+        local attitude_line = telemetry_line("DIPLOMACY_AUDIT", {
+            { "turn", stats.turn },
+            { "ai_ai_count", attitudes.ai_to_ai.count },
+            { "ai_ai_min", attitudes.ai_to_ai.minimum },
+            { "ai_ai_avg", attitudes.ai_to_ai.average },
+            { "ai_ai_max", attitudes.ai_to_ai.maximum },
+            { "ai_human_count", attitudes.ai_to_human.count },
+            { "ai_human_min", attitudes.ai_to_human.minimum },
+            { "ai_human_avg", attitudes.ai_to_human.average },
+            { "ai_human_max", attitudes.ai_to_human.maximum },
+            { "stance_block_checks", attitudes.stance_block_checks },
+            { "stance_blocked_directions", attitudes.stance_blocked_directions },
+            { "best_friend_pair_commands_ok", summary.best_friend_pair_commands_ok },
+            { "pairs_total", summary.diplomatic_pairs_total }
+        })
+        table.insert(file_lines, attitude_line)
+        table.insert(native_lines, attitude_line)
+
         local i
         for i = 1, #faction_audits do
             local audit = faction_audits[i]
@@ -1234,7 +1604,14 @@ local function emit_world_telemetry(stats, summary, faction_audits, audit_reason
                 { "turn", stats.turn },
                 { "faction", audit.faction },
                 { "regions", audit.regions },
-                { "armies", audit.armies },
+                { "imperium", audit.imperium },
+                { "military_forces", audit.military_forces },
+                { "commanded_armies", audit.armies },
+                { "garrison_armies", audit.garrison_armies },
+                { "army_units", audit.army_units },
+                { "full_armies", audit.full_armies },
+                { "army_goal", audit.army_goal },
+                { "army_shortfall", audit.army_shortfall },
                 { "navies", audit.navies },
                 { "treasury_before", audit.treasury_before },
                 { "treasury_target", audit.treasury_target },
@@ -1317,6 +1694,10 @@ local function reconcile_world(options)
     local catchup_counts = { 0, 0, 0, 0 }
     local base_commands_ok = 0
     local catchup_commands_ok = 0
+    local ai_commanded_armies = 0
+    local ai_army_goal = 0
+    local ai_full_armies = 0
+    local ai_factions_at_army_goal = 0
     local faction_audits = {}
     local i
 
@@ -1335,6 +1716,12 @@ local function reconcile_world(options)
             treasury_grant_count = treasury_grant_count + 1
         end
         if audit ~= nil then
+            ai_commanded_armies = ai_commanded_armies + audit.armies
+            ai_army_goal = ai_army_goal + audit.army_goal
+            ai_full_armies = ai_full_armies + audit.full_armies
+            if audit.army_shortfall <= 0 then
+                ai_factions_at_army_goal = ai_factions_at_army_goal + 1
+            end
             catchup_counts[audit.catchup + 1] = catchup_counts[audit.catchup + 1] + 1
             if audit.base_command_ok then
                 base_commands_ok = base_commands_ok + 1
@@ -1368,9 +1755,17 @@ local function reconcile_world(options)
         catchup_counts = catchup_counts,
         base_commands_ok = base_commands_ok,
         catchup_commands_ok = catchup_commands_ok,
+        ai_commanded_armies = ai_commanded_armies,
+        ai_army_goal = ai_army_goal,
+        ai_full_armies = ai_full_armies,
+        ai_factions_at_army_goal = ai_factions_at_army_goal,
         diplomatic_pairs = diplomatic_pairs,
         diplomatic_pairs_total = diplomatic_pairs_total,
         diplomatic_pairs_pending = diplomatic_pairs_pending,
+        best_friend_pair_commands_ok = runtime.state.diplomacy_peak
+                >= WR.config.lock_best_friends_tier
+            and math.max(diplomatic_pairs_total - diplomatic_pairs_pending, 0)
+            or 0,
         diplomatic_calls = diplomatic_calls,
         wars_ended = wars_ended,
         target_armies = WR.target_armies(stats.human, runtime.state.permanent_floor)
@@ -1635,7 +2030,22 @@ local function on_faction_turn_start(context)
             and #stats.humans > 0 then
             reconcile_faction(metric, stats, false)
             enforce_peace_for_faction(metric, stats)
-            reconcile_diplomacy(stats, WR.config.diplomacy_pair_budget_ai_turn)
+            local pairs_updated, diplomatic_calls, wars_ended,
+                pairs_total, pairs_pending = reconcile_diplomacy(
+                stats,
+                WR.config.diplomacy_pair_budget_ai_turn
+            )
+            if runtime.last_summary ~= nil then
+                runtime.last_summary.diplomatic_pairs = pairs_updated
+                runtime.last_summary.diplomatic_pairs_total = pairs_total
+                runtime.last_summary.diplomatic_pairs_pending = pairs_pending
+                runtime.last_summary.diplomatic_calls = diplomatic_calls
+                runtime.last_summary.wars_ended = wars_ended
+                runtime.last_summary.best_friend_pair_commands_ok = runtime.state.diplomacy_peak
+                        >= WR.config.lock_best_friends_tier
+                    and math.max(pairs_total - pairs_pending, 0)
+                    or 0
+            end
             runtime.last_stats = stats
         end
     end

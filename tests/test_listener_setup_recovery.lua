@@ -151,20 +151,28 @@ for i = 1, #required_events do
     assert_true(#partial_registry[event_name] == 1, "old registry is not modified during replacement setup")
 end
 
--- A table-shaped event slot may still reject insertion through a metatable.
--- The failure must be protected and named, while the five valid listeners stay
--- live and can repair the slot if Rome II later replaces it with a real array.
-local rejecting_slot = setmetatable({}, {
-    __newindex = function()
-        error("simulated insert failure")
-    end
-})
+-- A table-shaped event slot may still reject insertion. Lua 5.1's native
+-- table.insert uses a raw indexed write, so a __newindex metatable is not a
+-- valid way to inject this failure. Override table.insert only for the target
+-- slot to exercise the protected insertion boundary in the shipped runtime.
+local rejecting_slot = {}
 local insert_failure_registry = {}
 for i = 1, #required_events do
     insert_failure_registry[required_events[i]] = {}
 end
 insert_failure_registry.UICreated = rejecting_slot
-local insert_ready, insert_detail = WR.setup(insert_failure_registry)
+local original_table_insert = table.insert
+table.insert = function(target, value)
+    if target == rejecting_slot then
+        error("simulated insert failure")
+    end
+    return original_table_insert(target, value)
+end
+local setup_ok, insert_ready, insert_detail = pcall(WR.setup, insert_failure_registry)
+table.insert = original_table_insert
+if not setup_ok then
+    error("protected insert failure escaped setup: " .. tostring(insert_ready), 2)
+end
 assert_true(insert_ready == false, "one rejecting slot makes setup partial")
 assert_true(type(insert_detail) == "string", "insert failure returns aggregate detail")
 assert_true(

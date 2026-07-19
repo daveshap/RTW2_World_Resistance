@@ -45,6 +45,9 @@ local file_lines = {}
 io = {
     open = function(path, mode)
         table.insert(opened_paths, path .. ":" .. mode)
+        if mode == "r" then
+            return nil
+        end
         return {
             write = function(self, value)
                 if value ~= "\n" then
@@ -69,10 +72,14 @@ local ok, failure = pcall(dofile, "lua_scripts/all_scripted.lua")
 assert_true(ok, "director import failure must not abort the vanilla loader: " .. tostring(failure))
 assert_true(events == exported_events, "vanilla event registry remains available")
 assert_true(
-    #opened_paths == 6,
-    "loader writes start, registry, path, route, and failure records"
+    #opened_paths == 7,
+    "loader scans once and writes start, registry, path, route, and failure records"
 )
-for i = 1, #opened_paths do
+assert_true(
+    opened_paths[1] == "wr2_world_resistance_bootstrap.log:r",
+    "loader scans the root bootstrap path before its first append"
+)
+for i = 2, #opened_paths do
     assert_true(
         opened_paths[i] == "wr2_world_resistance_bootstrap.log:a",
         "every record uses the root bootstrap path"

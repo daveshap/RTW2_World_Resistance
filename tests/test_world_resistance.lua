@@ -92,12 +92,21 @@ assert_equal(WR.target_armies({ armies = 8 }, 0), 8, "pre-pivot army target")
 assert_equal(WR.target_armies({ armies = 8 }, 65), 16, "pivot minimum army target")
 assert_equal(WR.target_armies({ armies = 21 }, 65), 21, "post-pivot army target continues")
 
+-- Each AI's mobilization goal remains proportional to its settlement base,
+-- while the global fame table still permits a legal ceiling of sixteen.
+local mobilized_human = { armies = 16 }
+assert_equal(WR.ai_army_goal({ regions = 1 }, mobilized_human, 65), 4, "one region supports four-army goal")
+assert_equal(WR.ai_army_goal({ regions = 3 }, mobilized_human, 65), 12, "three regions support twelve-army goal")
+assert_equal(WR.ai_army_goal({ regions = 9 }, mobilized_human, 65), 16, "regional goal is capped at sixteen")
+assert_equal(WR.ai_army_goal({ regions = 0 }, mobilized_human, 65), 0, "landless faction has no recruitment goal")
+
 -- Weak factions receive the strongest catch-up regardless of relationship.
 local human = { regions = 55, armies = 16, treasury = 100000 }
 assert_equal(WR.catchup_level({ regions = 1, armies = 1, treasury = 1000 }, human, 65), 3, "one-region faction catch-up")
 assert_equal(WR.catchup_level({ regions = 55, armies = 16, treasury = 100000 }, human, 65), 0, "parity faction catch-up")
 local treasury_target = WR.treasury_target({ regions = 1 }, human, 3, 3, 65)
-assert_true(treasury_target >= 320000, "weak AI gets at least sixteen-stack replacement reserve")
+assert_true(treasury_target >= 250000, "weak AI keeps catch-up treasury parity")
+assert_true(treasury_target < 320000, "one-region reserve is not priced as sixteen field armies")
 
 -- Pair planner excludes humans, dormant factions, duplicates, and self-pairs.
 -- Relationship fields are deliberately present but ignored.
@@ -123,7 +132,7 @@ local telemetry = WR.telemetry_line("STATE", {
     { "number", 42 }
 })
 assert_true(
-    string.find(telemetry, "WR2|schema=1|event=STATE|release=0.1.5-beta|director=7", 1, true) == 1,
+    string.find(telemetry, "WR2|schema=1|event=STATE|release=0.1.6-beta|director=8", 1, true) == 1,
     "telemetry prefix is versioned and deterministic"
 )
 assert_true(

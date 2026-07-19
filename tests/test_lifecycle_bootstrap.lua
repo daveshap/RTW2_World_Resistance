@@ -68,6 +68,12 @@ local function make_force()
         end,
         is_navy = function(self)
             return false
+        end,
+        has_general = function(self)
+            return true
+        end,
+        unit_list = function(self)
+            return list({})
         end
     }
 end
@@ -322,7 +328,7 @@ for i = 1, #native_logs do
         and string.find(line, "|active_ai=1|", 1, true) then
         saw_state = true
     end
-    if string.find(line, "local diagnostics disabled safely", 1, true) then
+    if string.find(line, "local diagnostic file batch skipped safely", 1, true) then
         saw_denied_sink = true
     end
 end

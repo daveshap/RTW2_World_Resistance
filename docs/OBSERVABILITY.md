@@ -1,22 +1,24 @@
 # Observability and local diagnostics
 
-World Resistance 0.1.5 exposes module resolution, explicit event-registry handoff, listener registration, lazy engine discovery, event delivery, campaign probing, command processing, and diagnostic-file health as separate signals. This is deliberately not remote telemetry: the pack contains no network code and uploads nothing.
+World Resistance 0.1.6 exposes module resolution, explicit event-registry handoff, listener registration, lazy engine discovery, event delivery, campaign probing, command processing, field-army mobilization, directional diplomatic attitudes, and diagnostic-file health as separate signals. This is deliberately not remote telemetry: the pack contains no network code and uploads nothing.
 
 ## Bootstrap file
 
-The root `all_scripted.lua` loader owns a small append-only bootstrap stream. In a normal Steam installation its relative path resolves in the Rome II installation root, one directory above the installed pack:
+The root `all_scripted.lua` loader owns a small rolling bootstrap stream. In a normal Steam installation its relative path resolves in the Rome II installation root, one directory above the installed pack:
 
 ```text
 ...\Total War Rome II\wr2_world_resistance_bootstrap.log
 ```
 
-The root logger starts before the director import, so it can report a module-route or setup failure even when the detailed campaign logger never starts. A 0.1.5 line has this shape:
+The root logger starts before the director import, so it can report a module-route or setup failure even when the detailed campaign logger never starts. A 0.1.6 line has this shape:
 
 ```text
-WR2|schema=1|event=BOOT|release=0.1.5-beta|load=table: 01234567|stage=LOADER_START
+WR2|schema=1|event=BOOT|release=0.1.6-beta|load=table: 01234567|stage=LOADER_START
 ```
 
-`load` is an opaque token created for one evaluation of `all_scripted.lua`. Use it only to group lines from the same loader evaluation; it is not a campaign ID and is not persisted. This removes the ambiguity in older append-only traces, where adjacent blocks could have come from different Lua states or game launches.
+`load` is an opaque token created for one evaluation of `all_scripted.lua`. Use it only to group lines from the same loader evaluation; it is not a campaign ID and is not persisted. This removes the ambiguity in older traces, where adjacent blocks could have come from different Lua states or game launches.
+
+The bootstrap file has a hard ceiling of 1,000 lines. At the next append after it reaches that size, the logger rewrites the newest 800 lines and then appends the new record. It scans and tracks the file under protected calls; if safe tracking or rewrite is unavailable, that file record is skipped while native output and the vanilla loader continue.
 
 ### Loader and route milestones
 
@@ -86,27 +88,32 @@ data/wr2_world_resistance.log
 It is deliberately opened only after `FirstTickAfterWorldCreated`, or a later per-campaign-turn faction-turn fallback, has collected and processed a supported `main_rome` world. Each line retains the stable pipe-delimited schema:
 
 ```text
-WR2|schema=1|event=STATE|release=0.1.5-beta|director=7|key=value|...
+WR2|schema=1|event=STATE|release=0.1.6-beta|director=8|key=value|...
 ```
 
 Carriage returns, newlines, tabs, and pipe characters are removed from values. String fields are length-limited. The file is opened, appended, flushed, and closed for each batch so it can be inspected while Rome II is running.
 
+The detailed file also has a hard ceiling of 1,000 lines. Before a batch would exceed it, WR rewrites up to the newest 800 existing lines, reducing that tail when necessary to leave room for the complete incoming batch. If it cannot read/count the existing lines or safely finish the rewrite, it skips that file batch rather than appending beyond the ceiling. Native `out.ting` telemetry and every campaign mutation continue, and a later callback may retry.
+
 | Event | Frequency | Purpose |
 |---|---|---|
 | `SESSION_START` | First successful reconciliation in a Lua session | Release, campaign, human faction, turn, path, and local-only declaration |
-| `STATE` | At most once per human turn, plus the initial session state | Inputs, pressure/tier, active-AI counts, catch-up distribution, accepted bundle commands, bundle changes, treasury grant count/total, and diplomacy work |
+| `STATE` | At most once per human turn, plus the initial session state | Inputs, corrected human field-army metrics, pressure/tier, aggregate AI mobilization/goals, catch-up distribution, accepted bundle commands, treasury grants, pair backlog, accepted best-friend pair commands, and peace work |
 | `AI_AUDIT_BEGIN` / `AI_AUDIT_END` | Session start, tier escalation, and every tenth turn | Bounds and aggregate checks for a detailed audit block |
-| `AI` | Once per active AI inside an audit block | Regions, forces, treasury target/grant, catch-up, selected bundles, and command status |
+| `DIPLOMACY_AUDIT` | Once inside every detailed audit block | Directional AI-to-AI and AI-to-human attitude count/minimum/average/maximum, native stance-block readback, accepted best-friend pair-command count, and total pairs |
+| `AI` | Once per active AI inside an audit block | Regions, general-led field armies, garrisons, army units, 20-unit full stacks, mobilization goal/shortfall, treasury target/grant, catch-up, selected bundles, and command status |
 | `UI_NOTICE` | When a tier message command succeeds | Event key, tier, turn, and pressure |
 | `AI_WAR_SUPPRESSED` | At most once per declaring AI per turn | Number of protected peace commands issued after a declaration |
 
-The four catch-up counts in `STATE` and `AI_AUDIT_END` must sum to `active_ai`. `base_commands_ok` and `catchup_commands_ok` should also equal `active_ai` after a clean reconciliation.
+The four catch-up counts in `STATE` and `AI_AUDIT_END` must sum to `active_ai`. `base_commands_ok` and `catchup_commands_ok` should also equal `active_ai` after a clean reconciliation. `ai_commanded_armies` is the sum of general-led AI land forces, `ai_army_goal` is the sum of each faction's `min(4 × regions, human parity target, 16)` goal, `ai_full_armies` counts those field armies with at least 20 units, and `ai_factions_at_army_goal` counts factions with no goal shortfall.
 
 The bootstrap `WORLD_STATE` carries the most important activation totals even if the detailed file cannot be used: `active_ai`, `base_ok`, `catchup_ok`, `grant_count`, `grant_total`, pressure/tier, and `target_armies`. It does not replace the per-faction `AI` records, but it makes “the world reconciled and commands were attempted” observable at the bootstrap layer.
 
 `base_command_ok=true` means the protected Rome II call returned without a Lua exception and the director cached the requested selection. It does **not** mean the value was read back from the engine: the audited Rome II faction interface provides no effect-bundle query.
 
-`peace_commands` similarly counts accepted peace commands, not independently proven treaty transitions. Verify important native outcomes in the campaign UI during the live smoke test.
+`peace_commands` similarly counts accepted peace commands, not independently proven treaty transitions. `best_friend_pair_commands_ok` counts AI pairs for which the protected block-and-refresh commands were accepted; it is not native readback of the resulting stance. `stance_block_checks` and `stance_blocked_directions` in `DIPLOMACY_AUDIT` are the separate native readback counters. Verify important outcomes in the campaign UI during the live smoke test.
+
+`ai_ai_*` and `ai_human_*` are read from directional `faction_attitudes()` maps. They let a playtest compare whether AI-to-AI attitudes improve relative to AI-to-human attitudes, but WR does not write these numbers. The audited interface has no safe pair-specific numeric attitude setter, so the log must not be interpreted as proof of a hidden `+300` relation modifier.
 
 ## In-game status
 
@@ -116,7 +123,7 @@ The six status messages correspond to pressure bands 0, 20, 40, 65, 85, and 100.
 
 The status message is attempted only after both `UICreated` and successful world reconciliation. It is never invoked during `LoadingGame`. A missing message API or localization failure cannot authorize any additional campaign mutation.
 
-## Reading a 0.1.5 smoke test
+## Reading a 0.1.6 smoke test
 
 - No bootstrap file: the pack's loader may not have run, another `all_scripted.lua` may have won, an old pack may be selected, or file access may be blocked. Check the launcher and native script output.
 - `LOADER_START` without `MODULE_PATH_READY`: the preserved loader ran, but its path setup failed before the director route was attempted.
@@ -136,6 +143,8 @@ The status message is attempted only after both `UICreated` and successful world
 - `DIAGNOSTIC_SINK_ERROR`: the detailed file really did fail. `WORLD_STATE` still exposes compact activation totals and mechanics continue.
 - `WORLD_READY` with no detailed `SESSION_START`: check `DIAGNOSTIC_SINK_READY`/`DIAGNOSTIC_SINK_ERROR`; do not infer path failure merely from file absence.
 - `SESSION_START` plus `STATE`: the director reconciled the supported world and its protected commands returned. This is strong proof that the script is active, but not native-state readback.
+- `AI` records with high `garrison_armies` but low `commanded_armies`: expected for small factions. Only the latter consumes the field-army comparison target. Use `army_goal`, `army_shortfall`, `army_units`, and `full_armies` to watch mobilization over multiple turns.
+- `DIPLOMACY_AUDIT`: compare AI-to-AI and AI-to-human aggregates over successive scheduled audits. At Tier 85+, `stance_blocked_directions` should approach the number of successfully readable AI-to-AI directions after the pair backlog reaches zero. `best_friend_pair_commands_ok` remains command acceptance, not that readback.
 - `STATE` with no campaign message: campaign reconciliation worked; investigate `UICreated`, the custom event rows/localization, or message display.
 
 On a loaded save, the callbacks already exist before campaign lifecycle events begin. `LoadingGame` restores the six primitive named values when the interface is discoverable and remains read-only. `FirstTickAfterWorldCreated` is the normal first reconciliation edge. If the interface or world was not ready then, the first faction-turn callback in each campaign turn retries until success; it need not be the human's turn because the world scan independently locates and protects the human. A new campaign is therefore not required merely for the script to register, although it remains the only supported balance/army-cap starting point.
@@ -168,16 +177,18 @@ Neither reaches `LISTENERS_READY` or an `EVENT_HIT_*`. Read by load ID, this pro
 
 The third attached file extends that evidence with two 0.1.4 load IDs. The decisive loaded-campaign block reaches matching loader/director registry identities, six `LISTENER_OK_*` stages, `LISTENERS_READY`, `DIRECTOR_SETUP_OK`, `EVENT_HIT_LoadingGame`, `ENGINE_READY`, `EVENT_HIT_UICreated`, and `EVENT_HIT_FirstTickAfterWorldCreated`. It later records saving, faction-turn, and declaration-of-war event hits as well. Routing, exact registry transport, listener insertion, dispatch, and interface discovery therefore all work in the native game.
 
-That same block ends without `WORLD_READY` after emitting `WORLD_WAIT` at first tick. The detailed file is also absent. This is one failure, not two: detailed telemetry starts only inside a successful supported-world reconciliation. Source comparison against Creative Assembly's model-interface contract identifies the boundary: `MODEL_SCRIPT_INTERFACE.campaign_name(key)` returns whether the current campaign matches the supplied key. Release 0.1.4 called it with no argument and expected a string, so it rejected the valid Grand Campaign before bundle application or detailed logging. Release 0.1.5 calls `campaign_name("main_rome")` and records explicit attempt/failure/sink stages.
+That same block ends without `WORLD_READY` after emitting `WORLD_WAIT` at first tick. The detailed file is also absent. This is one failure, not two: detailed telemetry starts only inside a successful supported-world reconciliation. Source comparison against Creative Assembly's model-interface contract identifies the boundary: `MODEL_SCRIPT_INTERFACE.campaign_name(key)` returns whether the current campaign matches the supplied key. Release 0.1.4 called it with no argument and expected a string, so it rejected the valid Grand Campaign before bundle application or detailed logging. Release 0.1.5 corrected the predicate.
+
+The later 0.1.5 live files close that activation gap. A loaded maximum-pressure `main_rome` save reaches `DIAGNOSTIC_SINK_READY`, `WORLD_STATE`, `WORLD_READY`, `SESSION_START`, `STATE`, and a complete AI audit. Every active AI reports the Tier 100 base and Catch-up 3 package, treasury grants recur as needed, and all 91 surviving AI pairs are eventually processed; the trace also records the forced end of the AI-to-AI wars. The context popup appears once and remains deduplicated after a full game exit, reload, and turn advance. These observations validate activation and reconciliation, not every long-run CAI roster or alliance outcome.
 
 ## Historical activation defects
 
 Release 0.1.1 attempted to acquire the interface only during the early director import. If `game_interface` was still `nil`, it returned without normal listeners and never retried. The detailed logger also began only after successful reconciliation, so the same defect removed both mechanics and their evidence.
 
-Release 0.1.2 added an independent bootstrap stream and a deferred `NewSession` handoff, but its custom director remained under `lua_scripts` and was required through an ambient, context-sensitive route. Release 0.1.3 removed that route ambiguity and the single-event gate, but its regression harness shared a global `events` table between loader and director; the native 0.1.3 trace exposed that unmodeled boundary. Release 0.1.4 passed the exact registry as an argument, and the native trace confirms that repair through event delivery and interface discovery. It then exposed the incorrect zero-argument campaign-name assumption. Release 0.1.5 corrects the predicate and expands world/sink diagnostics; a successful native `WORLD_STATE`/`WORLD_READY` remains required.
+Release 0.1.2 added an independent bootstrap stream and a deferred `NewSession` handoff, but its custom director remained under `lua_scripts` and was required through an ambient, context-sensitive route. Release 0.1.3 removed that route ambiguity and the single-event gate, but its regression harness shared a global `events` table between loader and director; the native 0.1.3 trace exposed that unmodeled boundary. Release 0.1.4 passed the exact registry as an argument, and the native trace confirms that repair through event delivery and interface discovery. It then exposed the incorrect zero-argument campaign-name assumption. Release 0.1.5 corrected the predicate and completed native world reconciliation. Release 0.1.6 keeps that activation path and adds bounded files plus richer mobilization/diplomacy audit records.
 
 ## Failure behavior
 
-All operations for both files are protected. A bootstrap-file failure cannot abort the root loader. If the detailed sink cannot open, write, flush, or close, the director disables that sink for the Lua session while scaling, treasury, and diplomacy processing continue.
+All operations for both files are protected. A bootstrap-file tracking, compaction, or append failure skips that record and cannot abort the root loader. A detailed tracking or rewrite failure skips the current file batch so the 1,000-line ceiling is never knowingly exceeded; native output and mechanics continue and a later callback can retry. A direct detailed append/write/flush/close failure disables that file sink for the Lua session while scaling, treasury, and diplomacy processing continue.
 
 Compact session/state/audit-boundary records are also sent through Rome II's `out.ting` sink. A detailed-file failure produces one native warning rather than repeating every turn.

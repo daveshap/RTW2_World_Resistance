@@ -48,10 +48,22 @@ end
 local function force(kind)
     return {
         is_army = function(self)
-            return kind == "army"
+            return kind == "army" or kind == "garrison"
         end,
         is_navy = function(self)
             return kind == "navy"
+        end,
+        has_general = function(self)
+            return kind == "army"
+        end,
+        unit_list = function(self)
+            local units = {}
+            local count = kind == "army" and 20 or 0
+            local i
+            for i = 1, count do
+                units[i] = {}
+            end
+            return list(units)
         end
     }
 end
@@ -66,6 +78,9 @@ local function faction(key, human, region_count, army_count, treasury, imperium)
     for i = 1, army_count do
         forces[i] = force("army")
     end
+    for i = 1, region_count do
+        forces[army_count + i] = force("garrison")
+    end
     local result = {
         _key = key,
         _human = human,
@@ -73,6 +88,7 @@ local function faction(key, human, region_count, army_count, treasury, imperium)
         _forces = forces,
         _treasury = treasury,
         _imperium = imperium,
+        _attitudes = {},
         _wars = {}
     }
     function result:name()
@@ -92,6 +108,9 @@ local function faction(key, human, region_count, army_count, treasury, imperium)
     end
     function result:imperium_level()
         return self._imperium
+    end
+    function result:faction_attitudes()
+        return self._attitudes
     end
     function result:at_war(...)
         if select("#", ...) ~= 0 then
@@ -114,6 +133,10 @@ local neutral = faction("rom_arverni", false, 3, 1, 1000, 2)
 local enemy = faction("rom_carthage", false, 6, 3, 9000, 3)
 local dormant = faction("rom_dormant", false, 0, 0, 0, 0)
 
+ally._attitudes = { rom_arverni = -40, rom_carthage = 20, rom_rome = -90 }
+neutral._attitudes = { rom_athens = -20, rom_carthage = 30, rom_rome = -80 }
+enemy._attitudes = { rom_athens = 10, rom_arverni = 40, rom_rome = -70 }
+
 ally._wars[neutral._key] = true
 neutral._wars[ally._key] = true
 
@@ -126,6 +149,10 @@ end
 
 local model = {}
 local world = {}
+local campaign_ai = {}
+function campaign_ai:strategic_stance_between_factions_is_being_blocked(_a, _b)
+    return true
+end
 function model:world()
     return world
 end
@@ -137,6 +164,9 @@ function model:campaign_name(campaign_key)
 end
 function model:turn_number()
     return 77
+end
+function model:campaign_ai()
+    return campaign_ai
 end
 function world:faction_list()
     return list(factions)
@@ -167,6 +197,12 @@ function game:force_diplomacy(a, b, deal, offer, accept)
 end
 function game:cai_strategic_stance_manager_promote_specified_stance_towards_target_faction(a, b, stance)
     record("promote_stance", a, b, stance)
+end
+function game:cai_strategic_stance_manager_block_all_stances_but_that_specified_towards_target_faction(a, b, stance)
+    record("block_stance", a, b, stance)
+end
+function game:cai_strategic_stance_manager_force_stance_update_between_factions(a, b)
+    record("force_stance_update", a, b)
 end
 function game:force_make_peace(a, b)
     record("force_make_peace", a, b)
@@ -235,6 +271,8 @@ local mutation_before_first_tick = count_calls("apply_effect_bundle")
     + count_calls("treasury_mod")
     + count_calls("force_diplomacy")
     + count_calls("promote_stance")
+    + count_calls("block_stance")
+    + count_calls("force_stance_update")
     + count_calls("force_make_peace")
 assert_true(mutation_before_first_tick == 0, "LoadingGame is read-only")
 assert_true(count_calls("show_message_event") == 0, "LoadingGame never invokes UI")
@@ -269,6 +307,7 @@ assert_true(
 )
 local saw_session = false
 local saw_state = false
+local saw_diplomacy_audit = false
 local saw_file_failure = false
 for _, line in ipairs(native_logs) do
     if string.find(line, "WR2|schema=1|event=SESSION_START", 1, true) then
@@ -278,12 +317,20 @@ for _, line in ipairs(native_logs) do
         and string.find(line, "|active_ai=3|", 1, true) then
         saw_state = true
     end
-    if string.find(line, "local diagnostics disabled safely", 1, true) then
+    if string.find(line, "WR2|schema=1|event=DIPLOMACY_AUDIT", 1, true)
+        and string.find(line, "|ai_ai_count=6|", 1, true)
+        and string.find(line, "|ai_human_count=3|", 1, true)
+        and string.find(line, "|stance_block_checks=6|", 1, true)
+        and string.find(line, "|stance_blocked_directions=6|", 1, true) then
+        saw_diplomacy_audit = true
+    end
+    if string.find(line, "local diagnostic file batch skipped safely", 1, true) then
         saw_file_failure = true
     end
 end
 assert_true(saw_session, "native out.ting receives the session trace")
 assert_true(saw_state, "native out.ting receives the structured state trace")
+assert_true(saw_diplomacy_audit, "periodic audit separates AI-AI from AI-human attitudes")
 assert_true(saw_file_failure, "file failure is reported natively and remains nonfatal")
 
 -- A second callback in the same Lua campaign session must be a no-op.
@@ -313,7 +360,9 @@ for _, call in ipairs(calls) do
     elseif call.kind == "force_diplomacy"
         or call.kind == "force_make_peace"
         or call.kind == "force_make_trade_agreement"
-        or call.kind == "promote_stance" then
+        or call.kind == "promote_stance"
+        or call.kind == "block_stance"
+        or call.kind == "force_stance_update" then
         local a = call.args[1]
         local b = call.args[2]
         assert_true(a ~= "rom_rome" and b ~= "rom_rome", "diplomacy call must be AI-to-AI")
@@ -333,12 +382,18 @@ assert_true(treasury_by_faction.rom_rome == nil, "human receives no treasury gra
 assert_true(count_calls("force_make_peace") == 1, "existing AI-AI war is ended at tier 85")
 assert_true(ally._wars[neutral._key] ~= true, "mock AI-AI war state is peaceful")
 assert_true(count_calls("promote_stance") == 6, "all three AI pairs receive bidirectional stance promotion")
+assert_true(count_calls("block_stance") == 6, "all three AI pairs are locked to best-friends stance")
+assert_true(count_calls("force_stance_update") == 6, "all three AI-pair directions refresh immediately")
 assert_true(count_calls("force_make_trade_agreement") == 0, "forced trade waits for tier 100")
 
 local snapshot = WR.debug_snapshot()
 assert_true(snapshot.ai_count == 3, "all and only active AIs counted")
 assert_true(snapshot.tier == 4, "ninety regions reaches tier 85")
 assert_true(snapshot.target_armies == 16, "final Imperium army parity target")
+assert_true(snapshot.ai_commanded_armies == 6, "only general-led AI field armies are counted")
+assert_true(snapshot.ai_full_armies == 6, "twenty-unit commanded armies are reported as full")
+assert_true(snapshot.ai_army_goal == 16 + 12 + 16, "AI goals use four armies per region capped at sixteen")
+assert_true(snapshot.best_friend_pair_commands_ok == 3, "all AI pairs report accepted stance-lock commands")
 
 events.SavingGame[1]({})
 assert_true(saved.wr2_wr_pressure_v1 ~= nil, "pressure saved")
@@ -418,7 +473,9 @@ for _, call in ipairs(calls) do
     if call.kind == "force_diplomacy"
         or call.kind == "force_make_peace"
         or call.kind == "force_make_trade_agreement"
-        or call.kind == "promote_stance" then
+        or call.kind == "promote_stance"
+        or call.kind == "block_stance"
+        or call.kind == "force_stance_update" then
         assert_true(call.args[1] ~= "rom_rome" and call.args[2] ~= "rom_rome", "maximum-tier diplomacy remains AI-only")
     end
 end

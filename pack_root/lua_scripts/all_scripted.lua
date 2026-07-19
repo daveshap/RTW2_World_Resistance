@@ -19,10 +19,22 @@ events = triggers.events
 -- and native-output operation is protected: a read-only install must never
 -- abort Rome II's campaign loader.
 local WR_BOOT_LOG_PATH = "wr2_world_resistance_bootstrap.log"
-local WR_BOOT_RELEASE = "0.1.5-beta"
+local WR_BOOT_RELEASE = "0.1.6-beta"
+local WR_BOOT_LOG_MAX_LINES = 1000
+local WR_BOOT_LOG_RETAIN_LINES = 800
 local WR_BOOT_LOAD_ID = tostring({})
 local WR_MODULE_NAME = "wr2_world_resistance"
 local WR_MODULE_PATH = "script/campaign/wr2/?.lua"
+
+-- Keep a bounded tail in memory after one protected scan. At 1,000 records the
+-- next append first rewrites only the newest 800, leaving headroom for normal
+-- campaign loading without repeatedly rewriting the file. If any filesystem
+-- operation is unavailable, file telemetry is skipped until its size can be
+-- tracked safely, but the native trace and the vanilla loader always continue.
+local wr_boot_log_scanned = false
+local wr_boot_log_tracked = false
+local wr_boot_log_lines = 0
+local wr_boot_log_tail = {}
 
 local function wr_boot_value(value)
     local text = tostring(value == nil and "" or value)
@@ -50,14 +62,113 @@ local function wr_boot_native(line)
     end
 end
 
+local function wr_boot_tail_push(line)
+    wr_boot_log_tail[#wr_boot_log_tail + 1] = line
+    if #wr_boot_log_tail > WR_BOOT_LOG_RETAIN_LINES then
+        table.remove(wr_boot_log_tail, 1)
+    end
+end
+
+local function wr_boot_scan_log(io_api)
+    if wr_boot_log_scanned then
+        return wr_boot_log_tracked
+    end
+    wr_boot_log_scanned = true
+
+    local open_ok, file = pcall(function()
+        return io_api.open(WR_BOOT_LOG_PATH, "r")
+    end)
+    if not open_ok then
+        wr_boot_log_scanned = false
+        return false
+    end
+    if file == nil then
+        wr_boot_log_tracked = true
+        wr_boot_log_lines = 0
+        wr_boot_log_tail = {}
+        return true
+    end
+
+    local lines = 0
+    local tail = {}
+    local read_ok = pcall(function()
+        while true do
+            local value = file:read("*l")
+            if value == nil then
+                break
+            end
+            lines = lines + 1
+            tail[#tail + 1] = tostring(value)
+            if #tail > WR_BOOT_LOG_RETAIN_LINES then
+                table.remove(tail, 1)
+            end
+        end
+    end)
+    pcall(function()
+        file:close()
+    end)
+    if not read_ok then
+        wr_boot_log_scanned = false
+        return false
+    end
+
+    wr_boot_log_tracked = true
+    wr_boot_log_lines = lines
+    wr_boot_log_tail = tail
+    return true
+end
+
+local function wr_boot_compact_log(io_api)
+    local open_ok, file = pcall(function()
+        return io_api.open(WR_BOOT_LOG_PATH, "w")
+    end)
+    if not open_ok or file == nil then
+        return false
+    end
+
+    local write_ok = pcall(function()
+        local i
+        for i = 1, #wr_boot_log_tail do
+            file:write(wr_boot_log_tail[i])
+            file:write("\n")
+        end
+        file:flush()
+    end)
+    pcall(function()
+        file:close()
+    end)
+    if not write_ok then
+        -- A later record may rescan and recover whatever the filesystem kept.
+        wr_boot_log_scanned = false
+        wr_boot_log_tracked = false
+        return false
+    end
+
+    wr_boot_log_lines = #wr_boot_log_tail
+    return true
+end
+
 local function wr_boot_append(line)
     pcall(function()
         local io_api = rawget(_G, "io")
         if type(io_api) ~= "table" or type(io_api.open) ~= "function" then
             return
         end
-        local file = io_api.open(WR_BOOT_LOG_PATH, "a")
-        if file == nil then
+
+        local tracked = wr_boot_scan_log(io_api)
+        if not tracked then
+            return
+        end
+        if wr_boot_log_lines >= WR_BOOT_LOG_MAX_LINES then
+            if not wr_boot_compact_log(io_api) then
+                return
+            end
+        end
+
+        local open_ok, file = pcall(function()
+            return io_api.open(WR_BOOT_LOG_PATH, "a")
+        end)
+        if not open_ok or file == nil then
             return
         end
         local write_ok = pcall(function()
@@ -69,7 +180,14 @@ local function wr_boot_append(line)
             file:close()
         end)
         if not write_ok then
+            wr_boot_log_scanned = false
+            wr_boot_log_tracked = false
             return
+        end
+
+        if tracked then
+            wr_boot_log_lines = wr_boot_log_lines + 1
+            wr_boot_tail_push(line)
         end
     end)
 end

@@ -57,7 +57,10 @@ package.path = original_path
 
 local file_lines = {}
 io = {
-    open = function(_path, _mode)
+    open = function(_path, mode)
+        if mode == "r" then
+            return nil
+        end
         return {
             write = function(self, value)
                 if value ~= "\n" then

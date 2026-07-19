@@ -41,11 +41,11 @@ except ImportError:  # Direct execution from the tools directory.
     from rpfm_ws_client import RpfmWsError, RpfmWsSession
 
 
-BUILD_TOOL_VERSION = "1.5.0"
-RELEASE_VERSION = "0.1.5-beta"
+BUILD_TOOL_VERSION = "1.6.0"
+RELEASE_VERSION = "0.1.6-beta"
 GAME_KEY = "rome_2"
 CAMPAIGN_KEY = "main_rome"
-DIRECTOR_VERSION = 7
+DIRECTOR_VERSION = 8
 TELEMETRY_SCHEMA = 1
 PACK_FILENAME = "@wr2_world_resistance.pack"
 BOOTSTRAP_LOG_PATH = "wr2_world_resistance_bootstrap.log"
