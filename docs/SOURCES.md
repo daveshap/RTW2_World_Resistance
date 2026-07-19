@@ -1,6 +1,6 @@
 # Research sources
 
-Research snapshot: 2026-07-18.
+Research snapshot: 2026-07-19.
 
 ## Evidence standard
 
@@ -36,13 +36,22 @@ The schema repository contains multiple `fame_levels` versions, including v4 and
 
 | Source | Revision | Use |
 |---|---|---|
-| [ConsulScriptum](https://github.com/bukowa/ConsulScriptum/tree/95085275d9ad20167e72231a7c3304ab04d97777) | `95085275d9ad20167e72231a7c3304ab04d97777`, 2026-05-28 | Current Rome II API/event dump, lifecycle guidance, diplomacy strings, vanilla-preserving loader pattern |
+| [ConsulScriptum](https://github.com/bukowa/ConsulScriptum/tree/95085275d9ad20167e72231a7c3304ab04d97777) | `95085275d9ad20167e72231a7c3304ab04d97777`, 2026-05-28 | Current Rome II API/event dump, immediate event-table listeners, explicit custom module path, and lazy interface lookup |
 | [Total War Rome II docs](https://github.com/bukowa/twr2docs/tree/aeaece2b77f5ae7f197cf14184a367ce58a6e4e9) | `aeaece2b77f5ae7f197cf14184a367ce58a6e4e9`, 2026-04-25 | Rome II Lua loading order |
-| [Rome II Lua Profiler](https://github.com/bukowa/rome2_luaprofiler/tree/00a5cda98a3c12fe06ea7fca2ac627f5dac3d859) | `00a5cda98a3c12fe06ea7fca2ac627f5dac3d859` | Working `all_scripted.lua` pack pattern |
+| [Rome II Lua Profiler Steam fix](https://github.com/bukowa/rome2_luaprofiler/commit/00a5cda98a3c12fe06ea7fca2ac627f5dac3d859) | `00a5cda98a3c12fe06ea7fca2ac627f5dac3d859`, 2025-02-21 | Working `all_scripted.lua` correction: explicit `script/profi/?.lua` path, simple module name, direct `events` insertion, and removal of the early `EpisodicScripting` import |
+| [Current Grand Campaign `scripting.lua` reference](https://github.com/bukowa/tw_rome2_dei_ui_mod/blob/4fa458784362b2a8b9e2bd7ca1821036c7b0a781/mod/campaigns/main_rome/scripting.lua) | `4fa458784362b2a8b9e2bd7ca1821036c7b0a781`, 2025-02-18 | Working `main_rome` setup order: campaign-owned `EpisodicScripting` import, `SetCampaign`, and `initialise_let` from `UICreated` |
 | [Official Rome II Seasons and Wonders update](https://wiki.totalwar.com/w/Total_War_ROME_II%3A_Season_and_Wonders_Update.html) | Published CA wiki | Rome II's three-argument `show_message_event` signature and numeric `custom_event_` key rule |
 | [Official Attila campaign interface](https://wiki.totalwar.com/w/Total_War%3A_ATTILA_KIT_-_Campaign_Script_Interface) | Published CA wiki | Sibling-engine signatures for effect bundles, treasury, peace, trade, diplomacy, and stance calls |
 
-The audited event set is `LoadingGame`, `SavingGame`, `UICreated`, `FirstTickAfterWorldCreated`, `FactionTurnStart`, and `FactionLeaderDeclaresWar`. The current Rome II faction dump includes `imperium_level`, `is_human`, `region_list`, `military_force_list`, `treasury`, and no `is_dead` method. The current registry and vanilla EpisodicScripting expose the native logger as the table method `out.ting`, not callable `out()`.
+The loading-order evidence places `all_scripted.lua` before `campaigns/<campaign_name>/scripting.lua`. The working Grand Campaign script then imports `lua_scripts.EpisodicScripting`, calls `SetCampaign("main_rome")`, and initializes the export-trigger layer from its `UICreated` callback. The Lua Profiler's Steam correction is especially relevant: it removed an early `EpisodicScripting` import and direct `AddEventCallBack`, added an explicit pack-local search path, and inserted its callback directly into `events.FactionTurnStart`. Current ConsulScriptum follows the same structure, registering ordinary event-table listeners immediately and deliberately resolving `game_interface` later from global or already-loaded module state. Its [cross-campaign fix](https://github.com/bukowa/ConsulScriptum/commit/521a1677877d5d117d44f434bf308d0c003c8847) records why importing `EpisodicScripting` from the early loader is avoided.
+
+That evidence does **not** establish a callable ordering between a function appended to `events.NewSession` and Rome II's native `EpisodicScripting` initialization. Release 0.1.2 treated the two registration layers as if CA's callback would necessarily run first; the user's native trace disproved that operational assumption. Release 0.1.3 therefore removed `NewSession`, temporarily prepended `script/campaign/wr2/?.lua`, required the simple module name `wr2_world_resistance`, and restored the ambient path. A later native trace proved that route worked in two independent load IDs but that neither load reached listener readiness.
+
+Source inspection localized the remaining 0.1.3 assumption: `all_scripted.lua` held the exact `triggers.events` table, while the imported director attempted to rediscover `events` through its own `_G`. The existing Lua harness ran both in a shared global environment, but the native evidence did not validate that model. Release 0.1.4 replaces the implicit global boundary with the public dot-call API `WR.setup(event_registry)` and calls it as `director.setup(triggers.events)`. Registration is scoped to that object and inserts the six protected listeners for `LoadingGame`, `SavingGame`, `UICreated`, `FirstTickAfterWorldCreated`, `FactionTurnStart`, and `FactionLeaderDeclaresWar`.
+
+Each callback independently attempts lazy interface discovery from global `scripting`, global `EpisodicScripting`, and the already-loaded uppercase/lowercase module variants. The director never imports `EpisodicScripting` itself. `FirstTickAfterWorldCreated` is the normal world-reconciliation edge; the first human `FactionTurnStart` retries initialization if the interface or world was not ready then. The 0.1.4 lifecycle harness isolates the director from global `events`, passes the exact registry argument, and covers partial/repeated setup, a loaded-save path, a delayed interface, first-human-turn recovery, an unwritable installation, and repeated bootstrap entry. These tests establish Lua control-flow behavior only; no paid Rome II depot or executable was available for a native run.
+
+The current Rome II faction dump includes `imperium_level`, `is_human`, `region_list`, `military_force_list`, `treasury`, and no `is_dead` method. The current registry and vanilla EpisodicScripting expose the native logger as the table method `out.ting`, not callable `out()`.
 
 ## Decoded Workshop evidence
 
@@ -65,6 +74,10 @@ The selected 21 effects and scopes are recorded exactly in the project balance m
 
 These are user reports rather than controlled reproductions. They define test cases—clean startup, construction sabotage/repair, contradictory diplomacy, stale files—not proven root causes.
 
+## Inspected compatibility reference
+
+- [RTW2 Stable Politics / No Civil War](https://github.com/daveshap/RTW2_No_Civil_War), main branch inspected 2026-07-19. Its published presets contain one `effect_bundles_to_effects_junctions_tables` fragment for government loyalty. The repository documents no Lua campaign script, startpos change, or `fame_levels` override. Its keys do not overlap the World Resistance bundle rows, so the two packs are expected to coexist; this is source-level compatibility evidence, not a completed live two-mod test.
+
 ## Preserved local evidence
 
 The research workspace preserves:
@@ -73,6 +86,7 @@ The research workspace preserves:
 - exact decoded candidate effect rows and compact verified difficulty rows;
 - original acquired reference packs and SHA-256 manifests;
 - current Rome II loader, API, event, and runtime registry extracts;
+- the 0.1.4 explicit-registry, partial/repeated-setup, delayed-interface, human-turn-retry harness and protected bootstrap-trace assertions;
 - historical script examples retained as evidence only, never shipped as overrides.
 
 The release pack contains only the records needed to run World Resistance. Research packs and third-party scripts are not redistributed in the installable mod.

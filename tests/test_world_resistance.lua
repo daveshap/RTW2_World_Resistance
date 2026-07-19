@@ -1,4 +1,4 @@
-local script_path = "../pack_root/lua_scripts/wr2_world_resistance.lua"
+local script_path = "../pack_root/script/campaign/wr2/wr2_world_resistance.lua"
 local WR = dofile(script_path)
 
 local tests_run = 0
@@ -123,7 +123,7 @@ local telemetry = WR.telemetry_line("STATE", {
     { "number", 42 }
 })
 assert_true(
-    string.find(telemetry, "WR2|schema=1|event=STATE|release=0.1.1-beta|director=3", 1, true) == 1,
+    string.find(telemetry, "WR2|schema=1|event=STATE|release=0.1.4-beta|director=6", 1, true) == 1,
     "telemetry prefix is versioned and deterministic"
 )
 assert_true(

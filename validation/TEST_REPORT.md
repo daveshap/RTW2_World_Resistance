@@ -1,22 +1,33 @@
 # Validation report
 
-Release candidate: `0.1.1-beta`  
-Validation date: 2026-07-18  
+Release candidate: `0.1.4-beta`  
+Validation date: 2026-07-19  
 Target: current public pre-PANTHEON Rome II Grand Campaign (`main_rome`)
 
 ## Final pack
 
-- File: `dist/wr2_world_resistance.pack`
-- SHA-256: `9ca3cf59de7d1851110994917b43a777b46f5adf05c7b61e274439669fbada4e`
+- File: `dist/@wr2_world_resistance.pack`
+- SHA-256: `a2435188985fd93bb9b3998f2201ec9f3ed77f8001d59bf8cf3275750ad60f31`
 - Container: PFH4 Mod, type 3, zero flags, zero dependencies, zero timestamp
-- Contents: exactly five DB files, two Lua files, and one additive Loc file
-- Size: 85,539 bytes
+- Size: 104,015 bytes
+- Paths, exactly:
 
-Two independent clean builds, using separate RPFM homes and output paths, produced byte-identical packs with the same SHA-256.
+  - `db/effect_bundles_tables/wr2_world_resistance`
+  - `db/effect_bundles_to_effects_junctions_tables/wr2_world_resistance`
+  - `db/fame_levels_tables/wr2_world_resistance`
+  - `db/message_event_strings_tables/wr2_world_resistance`
+  - `db/message_events_tables/wr2_world_resistance`
+  - `lua_scripts/all_scripted.lua`
+  - `script/campaign/wr2/wr2_world_resistance.lua`
+  - `text/db/wr2_world_resistance.loc`
 
-## RPFM database checks
+The final PFH4 was reopened and verified for its header, file index, exact eight-path set, payload bounds, and SHA-256. The release tests also verify that this is the only `.pack` in `dist`.
 
-RPFM 5.0.5 encoded the source TSVs. A fresh RPFM process then reopened the final normalized pack, exported all three tables, and compared their decoded rows with the validated source.
+## Database and Loc provenance
+
+This is a Lua-only hotfix built from the RPFM-verified `0.1.1-beta` pack. The loader changed, the old `lua_scripts/wr2_world_resistance.lua` entry was removed, and the corrected director was added at `script/campaign/wr2/wr2_world_resistance.lua`. The following five DB payloads and one Loc payload were copied without decoding or re-encoding and are byte-identical to that base; their per-payload SHA-256 values are recorded in `build_report.json`.
+
+RPFM 5.0.5 was not rerun for this hotfix because its temporary executable was no longer available. The retained `0.1.1-beta` evidence is an exact RPFM encode, reopen, export, and source comparison of all five DB tables plus the Loc file:
 
 | Table | Version | Rows | Result |
 |---|---:|---:|---|
@@ -27,30 +38,45 @@ RPFM 5.0.5 encoded the source TSVs. A fresh RPFM process then reopened the final
 | `message_event_strings_tables` | 3 | 24 | Exact round trip; six events × four proven culture keys |
 | `text/db/wr2_world_resistance.loc` | Loc 1 | 30 | Exact round trip; all title/body references closed |
 
-RPFM found no unexpected pack diagnostic. Its only report was `IncorrectGamePath`, because this environment has no installed Rome II game path or dependency cache. Consequently, current live-depot foreign-key resolution remains an in-game/dependency-cache gate.
+That prior RPFM run found no unexpected pack diagnostic. Its only report was `IncorrectGamePath`, because this environment has no installed Rome II game path or dependency cache. The hotfix PFH4 itself was independently reopened and verified by `tools/pfh4.py`; current live-depot foreign-key resolution remains an in-game/dependency-cache gate.
 
-The schema snapshot SHA-256 is `cbdb4f74265958ea77da2789e15093c7d12c441a7660cf95cba09e3cf5d6eecf`. Detailed machine-readable results are in `build_report.json`.
+The unchanged schema snapshot SHA-256 is `cbdb4f74265958ea77da2789e15093c7d12c441a7660cf95cba09e3cf5d6eecf`. Detailed machine-readable provenance, retained RPFM results, payload hashes, and final-container results are in `build_report.json`; the original machine-readable RPFM report is retained as `build_report_v0.1.1.json`.
 
 ## Lua checks
 
-- Both shipped scripts compile under stock Lua 5.1.
+- Both shipped scripts remain Lua 5.1-syntax-only and parse/execute in the available Lua-compatible test runtime.
 - Pure pressure/catch-up/telemetry simulation: 34 assertions passed.
-- Mock Rome II engine simulation: 341 assertions passed.
-- Standalone vanilla-loader simulation: 14 assertions passed.
-- Total Lua simulation assertions: 389.
+- Mock Rome II engine simulation: 342 assertions passed.
+- Explicit-path vanilla-loader simulation: 21 assertions passed.
+- Immediate-listener/lazy-interface lifecycle simulation: 31 assertions passed.
+- Protected loader-failure simulation: 18 assertions passed.
+- Isolated loader/director environment and exact-registry handoff: 59 assertions passed.
+- Partial listener registration, retry, replacement-registry, and insertion-failure recovery: 68 assertions passed.
+- Missing/throwing/partial setup API failure boundaries: 27 assertions passed.
+- Total Lua simulation assertions: 600.
 
 The engine simulation covers universal ally/neutral/enemy scaling, dormant and human exclusion, read-only loading, UI-before-world ordering, first-tick idempotence, saved popup deduplication, tier escalation notices, denied-file-write safety, native `out.ting` traces, treasury parity, bounded diplomacy, Tier 85 forced AI peace, Tier 100 forced AI trade, declaration-time peace enforcement, and the no-human-diplomacy invariant.
 
+The lifecycle regression reproduces the corrected ordering: `all_scripted.lua` loads with a hostile ambient module path and no campaign interface; the loader temporarily supplies its unique director path; all six listeners register through the explicit setup call; and WR never imports `EpisodicScripting`. A too-early first tick remains uninitialized and mutation-free. After the simulated campaign publishes its existing interface, `LoadingGame` restores all six values and the first human faction turn completes the bounded retry, AI scaling, and treasury activation. Denied file writes remain nonfatal throughout.
+
+The new environment-boundary regression evaluates the root loader in an isolated global environment while the required director runs against a different `_G` containing a deliberate decoy `events` table. It proves that the loader passes its exact local `triggers.events` object into `WR.setup`, all six WR callbacks append beside pre-existing native callbacks, the decoy remains untouched, and a cached second loader evaluation reuses callback identities without duplication. Recovery coverage proves that missing or insertion-rejecting slots remain partial and later become ready without duplicating the listeners that already succeeded.
+
+Observability coverage now distinguishes both local logs. `wr2_world_resistance_bootstrap.log` records loader/director milestones before the game interface exists, while `data/wr2_world_resistance.log` remains the structured campaign telemetry sink after successful attachment. Static release checks verify both paths and the bootstrap milestone vocabulary; lifecycle simulation verifies that native bootstrap and session/state traces survive when both file-writing layers fail closed.
+
+The loader-failure regression forces the explicitly routed director import to throw before any campaign interface exists. It verifies that the vanilla loader and exported event registry survive, `package.path` is restored, the root bootstrap log receives route-level and final sanitized errors, native logging receives the failure, and no partial WR director is published.
+
 ## Python checks
 
-Twenty-eight tests passed. They cover:
+Thirty-two tests passed. They cover:
 
 - the exact 21-effect key/scope allowlist and JSON/CSV equality;
 - absolute bundle tiers, catch-up exclusivity, and the `-90%` owned reducer ceiling;
 - eight unique fame rows, preserved human thresholds, and the AI final-cap thresholds;
 - six unique numeric custom events, 24 culture-specific message rows, 30 unique localization rows, and exact title/body reference closure;
-- deterministic PFH4 encoding, sorting, atomic output, path safety, duplicate rejection, and malformed-pack rejection.
-- final release/version, eight-file path/hash/size, unchanged balance, observability, and RPFM reopen contracts.
+- deterministic PFH4 encoding, sorting, atomic output, path safety, duplicate rejection, and malformed-pack rejection;
+- the manual-load-order filename, exact eight-file path/hash/size contract, two-log observability paths, explicit module route, exact-registry setup contract, retry edge, and per-listener bootstrap milestones;
+- byte-for-byte equality between both tested Lua source files and the Lua payloads extracted from the final `.pack`, followed by rerunning all three new registry/setup integration fixtures against those extracted payloads;
+- the Lua-only payload provenance, byte-identical five-DB-plus-Loc base payloads, unchanged balance, and retained RPFM reopen contract.
 
 ## Limit of this report
 

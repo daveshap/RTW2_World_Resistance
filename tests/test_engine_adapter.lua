@@ -197,7 +197,8 @@ end
 
 scripting = { game_interface = game }
 
-local WR = dofile("../pack_root/lua_scripts/wr2_world_resistance.lua")
+local WR = dofile("../pack_root/script/campaign/wr2/wr2_world_resistance.lua")
+local setup_ready, setup_detail = WR.setup(events)
 WR.config.diplomacy_pair_budget_first_tick = 2
 WR.config.diplomacy_pair_budget_ai_turn = 1
 
@@ -218,6 +219,7 @@ local function count_calls(kind)
     return count
 end
 
+assert_true(setup_ready == true, "explicit event-registry setup succeeds: " .. tostring(setup_detail))
 assert_true(#events.FirstTickAfterWorldCreated == 1, "one FirstTick listener")
 assert_true(#events.LoadingGame == 1, "one LoadingGame listener")
 assert_true(#events.SavingGame == 1, "one SavingGame listener")

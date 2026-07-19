@@ -4,6 +4,8 @@
 
 World Resistance treats human hegemony as a global threat, not a local war state.
 
+Release 0.1.4 remains a standalone PFH4 Mod pack named `@wr2_world_resistance.pack`. The leading `@` is a launcher-recognition aid for manual installation, not a load-order mechanism or a second dependency.
+
 Every active non-human faction receives the same world-pressure tier, including factions that are neutral, allied, clients, distant, unmet, or currently at peace with the human. A weak AI can also receive one catch-up package. Only a faction with neither a region nor a military force is treated as dormant or dead, because Rome II's current faction scripting interface does not expose `is_dead()`.
 
 The human receives no World Resistance effect bundle, treasury grant, or pair-scoped diplomacy command. This invariant is checked at faction selection and again immediately before every diplomatic operation.
@@ -157,22 +159,30 @@ Pair work is processed in bounded batches—80 pairs at first tick and human tur
 
 ## Observability
 
-The director provides two independent proofs of life without modifying Rome II's UI component tree:
+Release 0.1.4 exposes three progressively stronger lifecycle signals without modifying Rome II's UI component tree:
 
-1. A supported custom message event appears after the first successful reconciliation and whenever the effective base tier reaches a new campaign high. The saved `highest_notified_tier` is monotonic, preventing reload or demotion spam and matching diplomacy's own high-water behavior.
-2. Structured, local-only diagnostics append to `data/wr2_world_resistance.log`. A `STATE` line records the human inputs, computed pressure, effective/desired tiers, active-AI and catch-up counts, command-acceptance counts, treasury grants, diplomacy backlog, and peace commands once per human turn.
+1. The root loader appends lifecycle milestones to installation-root `wr2_world_resistance_bootstrap.log`. `LOADER_START`, `MODULE_PATH_READY`, `DIRECTOR_ROUTE_TRY`, `DIRECTOR_ROUTE_OK`, and `DIRECTOR_REQUIRE_OK` prove the explicit pack-local module route. Matching loader-owned (`source=export_triggers`) and director-owned (`source=loader_argument`) `EVENT_REGISTRY_READY` identities, `DIRECTOR_SETUP_TRY`, six successful/reused listener outcomes, `LISTENERS_READY`, and `DIRECTOR_SETUP_OK` prove the root loader handed its exact `triggers.events` object to the director and all callbacks are present. Later `EVENT_HIT_*`, `ENGINE_READY`, and `WORLD_READY` milestones distinguish event dispatch, interface discovery, and successful reconciliation. `ENGINE_WAIT`, `ENGINE_UNAVAILABLE_*`, or `WORLD_WAIT` are recoverable waiting states because later events retry; `EVENT_REGISTRY_INVALID` or `LISTENERS_PARTIAL` is not accepted attachment.
+2. A supported custom message event appears after the first successful reconciliation and whenever the effective base tier reaches a new campaign high. The saved `highest_notified_tier` is monotonic, preventing reload or demotion spam and matching diplomacy's own high-water behavior.
+3. The existing structured, local-only campaign diagnostics append to `data/wr2_world_resistance.log`. A `STATE` line records the human inputs, computed pressure, effective/desired tiers, active-AI and catch-up counts, command-acceptance counts, treasury grants, diplomacy backlog, and peace commands once per human turn.
 
 A detailed `AI` block is written at session start, tier escalation, and every tenth turn. Each active non-human appears once with its regions, armies, navy count, treasury target/grant, catch-up level, selected bundle keys, and whether the corresponding protected engine commands completed without a Lua exception. The engine exposes no audited effect-bundle readback query, so `base_command_ok` and `catchup_command_ok` describe command acceptance and the director cache—not an independent query of native faction state.
 
-No network API is used and no diagnostic data leaves the local machine. File access is nonessential and fail-closed; compact session/state records also go to Rome II's native `out.ting` sink.
+No network API is used and no diagnostic data leaves the local machine. File access is nonessential and fail-closed; bootstrap milestones and compact session/state records also go to Rome II's native `out.ting` sink. `LISTENERS_READY` plus `DIRECTOR_SETUP_OK` proves accepted attachment, while a later `EVENT_HIT_*` proves dispatch and `SESSION_START` plus `STATE` is the first file evidence that a supported world actually reconciled.
 
 ## Lifecycle and save behavior
 
+- `all_scripted.lua` runs before the campaign interface is normally available. After the seven preserved vanilla imports and `events = triggers.events`, it temporarily prepends `script/campaign/wr2/?.lua`, protected-requires the simple module name `wr2_world_resistance`, and restores Rome II's original `package.path`.
+- The imported module returns `WR` and exposes the dot-call API `WR.setup(event_registry)`. The root loader passes the exact local object with `director.setup(triggers.events)`; the director does not use `_G.events` as an implicit transport.
+- Setup inserts six protected callbacks into the supplied table: `LoadingGame`, `SavingGame`, `UICreated`, `FirstTickAfterWorldCreated`, `FactionTurnStart`, and `FactionLeaderDeclaresWar`. Listener registration does not depend on `game_interface`, and repeated setup on the same registry reuses rather than duplicates callbacks.
+- World Resistance never imports `EpisodicScripting`. At each event it lazily checks global `scripting`, global `EpisodicScripting`, and already-loaded uppercase/lowercase module variants for `game_interface`; a missing interface is logged and a later event retries.
 - `LoadingGame` reads six primitive named values and does not mutate the world.
 - `UICreated` only marks the message UI as available; it cannot show status before a successful reconciliation.
-- `FirstTickAfterWorldCreated` performs the first reconciliation after a new campaign, load, or return from battle.
-- `FactionTurnStart` refreshes pressure, bundles, treasury, and diplomacy.
+- `FirstTickAfterWorldCreated` is the normal first reconciliation after a new campaign, load, or return from battle.
+- If first tick arrived before the interface or campaign world was usable, the first human `FactionTurnStart` retries one-time initialization. An AI turn can never trigger this fallback.
+- After initialization, `FactionTurnStart` refreshes pressure, bundles, treasury, and diplomacy.
 - `FactionLeaderDeclaresWar` reasserts hard AI peace for an AI declarer at high pressure.
 - `SavingGame` stores pressure, permanent floor, current tier, demotion counter, diplomacy high-water mark, and highest notified tier.
 
 Every bundle family is scrubbed before replacement, human bundles are scrubbed on every full update, and engine-facing calls are protected. Re-running converges on the same intended state.
+
+Release 0.1.1 returned from its early import when the interface was `nil`, leaving no listeners. Release 0.1.2 added a `NewSession` handoff and kept the director under the special `lua_scripts` module route. The first native trace showed both assumptions were unsafe. Release 0.1.3 introduced the explicit pack-local route and lazy interface discovery; the next trace proved the route worked in two loads but also showed that neither registered listeners. Its test harness had shared `_G.events` between loader and director, an environment boundary the game did not reproduce. Release 0.1.4 keeps the route and lazy behavior but passes `triggers.events` explicitly, with registry-scoped idempotence and partial-retry diagnostics. This correction does not relax the recommendation to begin a disposable new Grand Campaign, because live activation, army-cap, and existing-save behavior remain uncertified.

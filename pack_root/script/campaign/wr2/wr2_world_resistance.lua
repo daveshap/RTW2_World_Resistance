@@ -1,7 +1,7 @@
 -- World Resistance: universal anti-hegemon campaign director for Total War: ROME II.
 --
 -- Pack path (loaded by lua_scripts/all_scripted.lua):
---   lua_scripts/wr2_world_resistance.lua
+--   script/campaign/wr2/wr2_world_resistance.lua
 --
 -- Design constraints:
 --   * Every active non-human faction scales. Diplomacy/war/ally status is irrelevant.
@@ -10,8 +10,8 @@
 --   * World mutation begins at FirstTickAfterWorldCreated, never LoadingGame.
 --   * Save data consists only of primitive values supported by Rome II.
 
-local VERSION = 4
-local RELEASE_VERSION = "0.1.2-beta"
+local VERSION = 6
+local RELEASE_VERSION = "0.1.4-beta"
 local TELEMETRY_SCHEMA = 1
 local GLOBAL_KEY = "WR2_WORLD_RESISTANCE"
 
@@ -202,15 +202,19 @@ end
 WR.log = write_log
 
 local boot_milestone_emitted = {}
+local function emit_boot_milestone(stage, detail)
+    local emitter = rawget(_G, "WR2_BOOT_EMIT")
+    if type(emitter) == "function" then
+        pcall(emitter, stage, detail)
+    end
+end
+
 local function emit_boot_milestone_once(stage, detail)
     if boot_milestone_emitted[stage] then
         return
     end
     boot_milestone_emitted[stage] = true
-    local emitter = rawget(_G, "WR2_BOOT_EMIT")
-    if type(emitter) == "function" then
-        pcall(emitter, stage, detail)
-    end
+    emit_boot_milestone(stage, detail)
 end
 
 local diagnostic_sink_disabled = false
@@ -485,12 +489,14 @@ end
 local runtime = {
     initialized = false,
     listeners_registered = false,
+    listener_registration_count = 0,
     listener_registered_by_event = {},
-    new_session_bootstrap_registered = false,
-    new_session_bootstrap_running = false,
+    listener_wrapper_by_event = {},
+    event_registry = nil,
     ui_created = false,
     highest_notified_tier = -1,
     game = nil,
+    game_interface_source = nil,
     state = {
         pressure = 0,
         permanent_floor = 0,
@@ -510,6 +516,11 @@ local runtime = {
     last_summary = nil
 }
 WR.runtime = runtime
+
+-- Declared before the lifecycle handlers and assigned by the adapter section
+-- below. Every event performs this lazy lookup; no event depends on a single
+-- NewSession edge or on importing EpisodicScripting before Rome II does.
+local acquire_game_interface
 
 local SAVE_KEYS = {
     pressure = "wr2_wr_pressure_v1",
@@ -1367,12 +1378,13 @@ end
 
 local function on_ui_created(_context)
     runtime.ui_created = true
+    acquire_game_interface("UICreated")
     try_show_status()
 end
 
 
 local function on_loading_game(context)
-    if runtime.game == nil then
+    if not acquire_game_interface("LoadingGame") then
         return
     end
     -- LoadingGame is read-only by design. No bundle, treasury, diplomacy, or
@@ -1404,7 +1416,7 @@ end
 
 
 local function on_saving_game(context)
-    if runtime.game == nil then
+    if not acquire_game_interface("SavingGame") then
         return
     end
     safe_engine_call("save:pressure", function()
@@ -1432,13 +1444,11 @@ local function on_saving_game(context)
 end
 
 
-local function on_first_tick_after_world_created(_context)
+local function initialize_world_once(source)
     if runtime.initialized then
-        write_log_once("duplicate-first-tick", "Duplicate FirstTickAfterWorldCreated ignored in the same campaign Lua session")
-        return
+        return true
     end
-    runtime.initialized = true
-    write_log("initializing version " .. tostring(VERSION))
+    write_log("initializing version " .. tostring(VERSION) .. " from " .. tostring(source))
     local reconciled = reconcile_world({
         grant_treasury = true,
         diplomacy_pair_budget = WR.config.diplomacy_pair_budget_first_tick,
@@ -1446,13 +1456,34 @@ local function on_first_tick_after_world_created(_context)
         session_start = true
     })
     if reconciled then
+        runtime.initialized = true
+        emit_boot_milestone_once("WORLD_READY", source)
         try_show_status()
+        return true
     end
+    emit_boot_milestone_once("WORLD_WAIT", source)
+    write_log_once(
+        "initialization-wait",
+        "Campaign world was not ready; initialization will retry on the first human faction turn"
+    )
+    return false
+end
+
+
+local function on_first_tick_after_world_created(_context)
+    if runtime.initialized then
+        write_log_once("duplicate-first-tick", "Duplicate FirstTickAfterWorldCreated ignored in the same campaign Lua session")
+        return
+    end
+    if not acquire_game_interface("FirstTickAfterWorldCreated") then
+        return
+    end
+    initialize_world_once("FirstTickAfterWorldCreated")
 end
 
 
 local function on_faction_turn_start(context)
-    if not runtime.initialized then
+    if not acquire_game_interface("FactionTurnStart") then
         return
     end
     local faction = safe_read("event:FactionTurnStart:faction", function()
@@ -1463,6 +1494,16 @@ local function on_faction_turn_start(context)
     end
     local metric = inspect_faction(faction)
     if metric == nil then
+        return
+    end
+
+    -- FirstTickAfterWorldCreated is the normal activation edge. This fallback
+    -- covers a state where the event arrived before the campaign published its
+    -- interface; it never activates from an AI turn.
+    if not runtime.initialized then
+        if metric.human then
+            initialize_world_once("FactionTurnStart")
+        end
         return
     end
 
@@ -1500,6 +1541,9 @@ end
 
 
 local function on_faction_declares_war(context)
+    if not acquire_game_interface("FactionLeaderDeclaresWar") then
+        return
+    end
     if not runtime.initialized or runtime.state.diplomacy_peak < WR.config.hard_ai_peace_tier then
         return
     end
@@ -1556,26 +1600,197 @@ function WR.debug_snapshot()
 end
 
 
-local function register_listener(event_name, callback)
-    if runtime.listener_registered_by_event[event_name] then
-        return true
+local register_lifecycle_listeners
+
+local lifecycle_listeners = {
+    { "LoadingGame", on_loading_game },
+    { "SavingGame", on_saving_game },
+    { "UICreated", on_ui_created },
+    { "FirstTickAfterWorldCreated", on_first_tick_after_world_created },
+    { "FactionTurnStart", on_faction_turn_start },
+    { "FactionLeaderDeclaresWar", on_faction_declares_war }
+}
+
+local function listener_slot_contains(slot, callback)
+    local ok, found_or_error = pcall(function()
+        local i
+        for i = 1, #slot do
+            if slot[i] == callback then
+                return true
+            end
+        end
+        return false
+    end)
+    if not ok then
+        return false, tostring(found_or_error)
     end
-    local event_table = rawget(_G, "events")
-    if type(event_table) ~= "table" or type(event_table[event_name]) ~= "table" then
+    return found_or_error == true, nil
+end
+
+local function listener_slot_size(slot)
+    local ok, size_or_error = pcall(function()
+        return #slot
+    end)
+    if not ok then
+        return nil, tostring(size_or_error)
+    end
+    return size_or_error, nil
+end
+
+local function listener_detail(event_registry, event_name, suffix)
+    local detail = "source=argument;registry=" .. tostring(event_registry)
+        .. ";event=" .. tostring(event_name)
+    if suffix ~= nil and suffix ~= "" then
+        detail = detail .. ";" .. tostring(suffix)
+    end
+    return detail
+end
+
+local function register_listener(event_registry, event_name, callback)
+    local protected_callback = runtime.listener_wrapper_by_event[event_name]
+    if protected_callback == nil then
+        protected_callback = function(context)
+            -- A partial registry can become complete later in the same Lua
+            -- state. Any callback that did attach retries the missing slots
+            -- before doing campaign work; registration is identity-checked and
+            -- therefore cannot duplicate callbacks already present.
+            if not runtime.listeners_registered
+                and type(runtime.event_registry) == "table"
+                and type(register_lifecycle_listeners) == "function" then
+                local retry_ok, retry_error = pcall(
+                    register_lifecycle_listeners,
+                    runtime.event_registry,
+                    "event_retry:" .. event_name
+                )
+                if not retry_ok then
+                    write_log_once(
+                        "listener-retry:" .. event_name,
+                        "Listener retry failed safely: " .. event_name
+                            .. " :: " .. tostring(retry_error)
+                    )
+                end
+            end
+
+            emit_boot_milestone_once("EVENT_HIT_" .. event_name)
+            local ok, callback_error = pcall(callback, context)
+            if not ok then
+                emit_boot_milestone_once("EVENT_ERROR_" .. event_name, callback_error)
+                write_log_once(
+                    "event-callback:" .. event_name,
+                    "Event callback failed safely: " .. event_name
+                        .. " :: " .. tostring(callback_error)
+                )
+            end
+        end
+        runtime.listener_wrapper_by_event[event_name] = protected_callback
+    end
+
+    if type(event_registry) ~= "table" then
+        runtime.listener_registered_by_event[event_name] = false
+        emit_boot_milestone(
+            "LISTENER_MISSING_" .. event_name,
+            listener_detail(
+                event_registry,
+                event_name,
+                "registry_type=" .. tostring(type(event_registry))
+            )
+        )
+        write_log_once("missing-registry:" .. event_name, "Event registry unavailable: " .. event_name)
+        return false
+    end
+
+    local slot_ok, slot_or_error = pcall(function()
+        return event_registry[event_name]
+    end)
+    if not slot_ok or type(slot_or_error) ~= "table" then
+        runtime.listener_registered_by_event[event_name] = false
+        local suffix = "slot_type=" .. tostring(type(slot_or_error))
+        if not slot_ok then
+            suffix = "lookup_error=" .. tostring(slot_or_error)
+        end
+        emit_boot_milestone(
+            "LISTENER_MISSING_" .. event_name,
+            listener_detail(event_registry, event_name, suffix)
+        )
         write_log_once("missing-event:" .. event_name, "Event unavailable: " .. event_name)
         return false
     end
-    local inserted, insert_error = pcall(function()
-        table.insert(event_table[event_name], callback)
-    end)
-    if not inserted then
+
+    local slot = slot_or_error
+    local already_present, scan_error = listener_slot_contains(slot, protected_callback)
+    if scan_error ~= nil then
+        runtime.listener_registered_by_event[event_name] = false
+        emit_boot_milestone(
+            "LISTENER_INSERT_ERROR_" .. event_name,
+            listener_detail(event_registry, event_name, "scan_error=" .. scan_error)
+        )
         write_log_once(
-            "listener-insert:" .. event_name,
-            "Listener registration failed safely: " .. event_name .. " :: " .. tostring(insert_error)
+            "listener-scan:" .. event_name,
+            "Listener verification failed safely: " .. event_name .. " :: " .. scan_error
         )
         return false
     end
+    if already_present then
+        runtime.listener_registered_by_event[event_name] = true
+        local size = listener_slot_size(slot)
+        emit_boot_milestone(
+            "LISTENER_REUSED_" .. event_name,
+            listener_detail(event_registry, event_name, "count=" .. tostring(size))
+        )
+        return true
+    end
+
+    local before, before_error = listener_slot_size(slot)
+    if before == nil then
+        runtime.listener_registered_by_event[event_name] = false
+        emit_boot_milestone(
+            "LISTENER_INSERT_ERROR_" .. event_name,
+            listener_detail(event_registry, event_name, "size_error=" .. tostring(before_error))
+        )
+        return false
+    end
+
+    local inserted, insert_error = pcall(function()
+        table.insert(slot, protected_callback)
+    end)
+    if not inserted then
+        runtime.listener_registered_by_event[event_name] = false
+        emit_boot_milestone(
+            "LISTENER_INSERT_ERROR_" .. event_name,
+            listener_detail(event_registry, event_name, "insert_error=" .. tostring(insert_error))
+        )
+        write_log_once(
+            "listener-insert:" .. event_name,
+            "Listener registration failed safely: " .. event_name
+                .. " :: " .. tostring(insert_error)
+        )
+        return false
+    end
+
+    local verified, verify_error = listener_slot_contains(slot, protected_callback)
+    local after = listener_slot_size(slot)
+    if not verified or verify_error ~= nil then
+        runtime.listener_registered_by_event[event_name] = false
+        emit_boot_milestone(
+            "LISTENER_INSERT_ERROR_" .. event_name,
+            listener_detail(
+                event_registry,
+                event_name,
+                "verify_error=" .. tostring(verify_error or "callback identity absent")
+            )
+        )
+        return false
+    end
+
     runtime.listener_registered_by_event[event_name] = true
+    emit_boot_milestone(
+        "LISTENER_OK_" .. event_name,
+        listener_detail(
+            event_registry,
+            event_name,
+            "before=" .. tostring(before) .. ";after=" .. tostring(after)
+        )
+    )
     return true
 end
 
@@ -1591,130 +1806,148 @@ local function game_interface_from(candidate)
 end
 
 
-local initialize_engine_adapter
+register_lifecycle_listeners = function(event_registry, source)
+    source = source or "explicit_setup"
 
-local function register_new_session_bootstrap()
-    if runtime.new_session_bootstrap_registered then
+    if type(event_registry) ~= "table" then
+        emit_boot_milestone(
+            "EVENT_REGISTRY_INVALID",
+            "source=" .. tostring(source) .. ";registry_type=" .. tostring(type(event_registry))
+        )
+    else
+        if runtime.event_registry ~= event_registry then
+            runtime.event_registry = event_registry
+            runtime.listeners_registered = false
+            runtime.listener_registration_count = 0
+            runtime.listener_registered_by_event = {}
+        end
+        emit_boot_milestone(
+            "EVENT_REGISTRY_READY",
+            "source=" .. tostring(source) .. ";registry_type=table;registry="
+                .. tostring(event_registry)
+        )
+    end
+
+    local registered = 0
+    local i
+    for i = 1, #lifecycle_listeners do
+        if register_listener(
+            event_registry,
+            lifecycle_listeners[i][1],
+            lifecycle_listeners[i][2]
+        ) then
+            registered = registered + 1
+        end
+    end
+
+    local all_registered = registered == #lifecycle_listeners
+    if type(event_registry) == "table" and runtime.event_registry == event_registry then
+        runtime.listeners_registered = all_registered
+        runtime.listener_registration_count = registered
+    end
+
+    local detail = "registered=" .. tostring(registered) .. "/"
+        .. tostring(#lifecycle_listeners) .. ";source=" .. tostring(source)
+        .. ";registry=" .. tostring(event_registry)
+    if all_registered then
+        emit_boot_milestone("LISTENERS_READY", detail)
+        write_log_once(
+            "listeners-ready:" .. tostring(event_registry),
+            "Rome II lifecycle listeners registered (6/6)"
+        )
+    else
+        emit_boot_milestone("LISTENERS_PARTIAL", detail)
+    end
+    return all_registered, detail
+end
+
+
+local function discover_game_interface()
+    local candidates = {}
+    local function add(source, candidate)
+        if candidate ~= nil then
+            table.insert(candidates, { source = source, candidate = candidate })
+        end
+    end
+
+    add("global:scripting", rawget(_G, "scripting"))
+    add("global:EpisodicScripting", rawget(_G, "EpisodicScripting"))
+
+    local package_api = rawget(_G, "package")
+    if type(package_api) == "table" and type(package_api.loaded) == "table" then
+        add(
+            "package:lua_scripts.EpisodicScripting",
+            package_api.loaded["lua_scripts.EpisodicScripting"]
+        )
+        add(
+            "package:lua_scripts.episodicscripting",
+            package_api.loaded["lua_scripts.episodicscripting"]
+        )
+        add(
+            "package:data.lua_scripts.EpisodicScripting",
+            package_api.loaded["data.lua_scripts.EpisodicScripting"]
+        )
+        add(
+            "package:data.lua_scripts.episodicscripting",
+            package_api.loaded["data.lua_scripts.episodicscripting"]
+        )
+    end
+
+    local i
+    for i = 1, #candidates do
+        local game_interface = game_interface_from(candidates[i].candidate)
+        if game_interface ~= nil then
+            return game_interface, candidates[i].source
+        end
+    end
+    return nil, nil
+end
+
+
+acquire_game_interface = function(event_name)
+    if runtime.game ~= nil then
         return true
     end
 
-    local event_table = rawget(_G, "events")
-    if type(event_table) ~= "table" or type(event_table.NewSession) ~= "table" then
-        write_log_once("missing-event:NewSession", "Event unavailable: NewSession")
-        return false
-    end
-
-    -- EpisodicScripting was required before this function is reached. Appending
-    -- here therefore puts CA's callback first; it populates game_interface and
-    -- this guarded callback then retries the World Resistance adapter.
-    local callback = function(_context)
-        if runtime.listeners_registered or runtime.new_session_bootstrap_running then
-            return
+    local game_interface, source = discover_game_interface()
+    if game_interface == nil then
+        emit_boot_milestone_once("ENGINE_WAIT", event_name)
+        if event_name ~= "director_import" then
+            emit_boot_milestone_once("ENGINE_UNAVAILABLE_" .. tostring(event_name))
         end
-        runtime.new_session_bootstrap_running = true
-        local ok, initialized_or_error = pcall(initialize_engine_adapter)
-        runtime.new_session_bootstrap_running = false
-        if not ok then
-            write_log_once(
-                "new-session-bootstrap-error",
-                "NewSession bootstrap failed safely: " .. tostring(initialized_or_error)
-            )
-        elseif not initialized_or_error then
-            write_log_once(
-                "new-session-bootstrap-no-engine",
-                "NewSession fired but the Rome II scripting interface was still unavailable"
-            )
-        end
-    end
-
-    local inserted, insert_error = pcall(function()
-        table.insert(event_table.NewSession, callback)
-    end)
-    if not inserted then
         write_log_once(
-            "new-session-bootstrap-insert",
-            "NewSession bootstrap registration failed safely: " .. tostring(insert_error)
+            "no-engine:" .. tostring(event_name),
+            "Rome II scripting interface unavailable at " .. tostring(event_name)
+                .. "; a later campaign event will retry"
         )
         return false
     end
-    runtime.new_session_bootstrap_registered = true
-    write_log("NewSession bootstrap registered; waiting for Rome II game interface")
+
+    runtime.game = game_interface
+    runtime.game_interface_source = source
+    emit_boot_milestone_once("ENGINE_READY", tostring(source) .. "@" .. tostring(event_name))
+    write_log("Rome II scripting interface acquired from " .. tostring(source))
     return true
 end
 
 
-local function register_lifecycle_listeners()
-    if runtime.listeners_registered then
-        return true
-    end
-
-    local listeners = {
-        { "LoadingGame", on_loading_game },
-        { "SavingGame", on_saving_game },
-        { "UICreated", on_ui_created },
-        { "FirstTickAfterWorldCreated", on_first_tick_after_world_created },
-        { "FactionTurnStart", on_faction_turn_start },
-        { "FactionLeaderDeclaresWar", on_faction_declares_war }
-    }
-    local all_registered = true
-    local i
-    for i = 1, #listeners do
-        if not register_listener(listeners[i][1], listeners[i][2]) then
-            all_registered = false
-        end
-    end
-    runtime.listeners_registered = all_registered
-    if all_registered then
-        emit_boot_milestone_once("LISTENERS_READY")
-        write_log("Rome II lifecycle listeners registered")
-    end
-    return all_registered
-end
-
-
-initialize_engine_adapter = function()
-    if runtime.game ~= nil and runtime.listeners_registered then
-        return true
-    end
-
-    local scripting_api = rawget(_G, "scripting")
-    local game_interface = game_interface_from(scripting_api)
-
-    if game_interface == nil and type(package.loaded) == "table" then
-        scripting_api = package.loaded["lua_scripts.EpisodicScripting"]
-            or package.loaded["lua_scripts.episodicscripting"]
-        game_interface = game_interface_from(scripting_api)
-    end
-
-    if game_interface == nil then
-        local ok, loaded = pcall(require, "lua_scripts.EpisodicScripting")
-        if not ok then
-            ok, loaded = pcall(require, "lua_scripts.episodicscripting")
-        end
-        if ok then
-            scripting_api = rawget(_G, "scripting") or loaded
-            game_interface = game_interface_from(scripting_api)
-        end
-    end
-
-    if game_interface == nil then
-        register_new_session_bootstrap()
-        emit_boot_milestone_once("ENGINE_WAIT")
-        write_log_once(
-            "no-engine",
-            "Rome II scripting interface not ready yet; adapter will retry after NewSession"
-        )
-        return false
-    end
-    runtime.game = game_interface
-    emit_boot_milestone_once("ENGINE_READY")
-    return register_lifecycle_listeners()
+local function setup(event_registry)
+    -- The root loader passes export_triggers.events by identity. Listener
+    -- registration is independent of game_interface; Rome II's campaign script
+    -- owns EpisodicScripting initialization, and later events retry discovery.
+    local listeners_ready, detail = register_lifecycle_listeners(
+        event_registry,
+        "loader_argument"
+    )
+    acquire_game_interface("director_setup")
+    return listeners_ready, detail
 end
 
 
 WR.reconcile_world = reconcile_world
-WR.initialize_engine_adapter = initialize_engine_adapter
-
-initialize_engine_adapter()
+WR.setup = setup
+-- Compatibility alias for local harnesses and downstream experiments. It has
+-- the same explicit-registry contract and never falls back to _G.events.
+WR.initialize_engine_adapter = setup
 
 return WR

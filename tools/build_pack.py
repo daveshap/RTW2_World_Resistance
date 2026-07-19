@@ -41,10 +41,15 @@ except ImportError:  # Direct execution from the tools directory.
     from rpfm_ws_client import RpfmWsError, RpfmWsSession
 
 
-BUILD_TOOL_VERSION = "1.1.0"
-RELEASE_VERSION = "0.1.1-beta"
+BUILD_TOOL_VERSION = "1.4.0"
+RELEASE_VERSION = "0.1.4-beta"
 GAME_KEY = "rome_2"
 CAMPAIGN_KEY = "main_rome"
+DIRECTOR_VERSION = 6
+TELEMETRY_SCHEMA = 1
+PACK_FILENAME = "@wr2_world_resistance.pack"
+BOOTSTRAP_LOG_PATH = "wr2_world_resistance_bootstrap.log"
+DIAGNOSTIC_LOG_PATH = "data/wr2_world_resistance.log"
 
 BASE_KEYS = [
     "wr2_wr_ai_tier_00",
@@ -268,7 +273,7 @@ LOC_PATH = "text/db/wr2_world_resistance.loc"
 
 LUA_PATHS = [
     "lua_scripts/all_scripted.lua",
-    "lua_scripts/wr2_world_resistance.lua",
+    "script/campaign/wr2/wr2_world_resistance.lua",
 ]
 REQUIRED_PACK_PATHS = sorted(
     [spec[3] for spec in DB_SPECS] + [LOC_PATH] + LUA_PATHS,
@@ -982,7 +987,7 @@ def build(arguments: argparse.Namespace) -> dict[str, object]:
             tsv_paths,
             stage_pack,
         )
-        candidate = temporary / "wr2_world_resistance.pack"
+        candidate = temporary / PACK_FILENAME
         final_validation = _normalize_rpfm_stage(stage_pack, candidate, project)
         reopen = _rpfm_reopen_validate(
             server,
@@ -1006,6 +1011,25 @@ def build(arguments: argparse.Namespace) -> dict[str, object]:
             "campaign": CAMPAIGN_KEY,
             "compatibility": "current stable pre-PANTHEON",
             "fame_table_version": 4,
+        },
+        "runtime_contract": {
+            "pack_filename": PACK_FILENAME,
+            "director_version": DIRECTOR_VERSION,
+            "telemetry_schema": TELEMETRY_SCHEMA,
+            "bootstrap_log_path": BOOTSTRAP_LOG_PATH,
+            "diagnostic_log_path": DIAGNOSTIC_LOG_PATH,
+            "director_module_path": "script/campaign/wr2/wr2_world_resistance.lua",
+            "director_require_name": "wr2_world_resistance",
+            "listener_registration": "explicit_loader_setup_with_exported_registry",
+            "listener_idempotence": "registry_and_callback_identity",
+            "listener_partial_retry": "attached_callback_or_repeated_setup",
+            "interface_binding": "lazy_existing_episodic_state",
+            "initialization_event": "FirstTickAfterWorldCreated",
+            "initialization_retry": "human_FactionTurnStart",
+        },
+        "payload_provenance": {
+            "mode": "fresh_rpfm_build",
+            "rpfm_revalidated_this_hotfix": True,
         },
         "inputs": {
             "schema_sha256": _sha256(schema_source),
@@ -1077,7 +1101,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output",
         type=Path,
-        default=project / "dist" / "wr2_world_resistance.pack",
+        default=project / "dist" / PACK_FILENAME,
     )
     parser.add_argument(
         "--report",

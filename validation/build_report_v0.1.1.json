@@ -1,13 +1,13 @@
 {
-  "build_tool_version": "1.4.0-hotfix",
+  "build_tool_version": "1.1.0",
   "final_pack": {
     "dependency_count": 0,
     "file_count": 8,
-    "file_index_size": 394,
+    "file_index_size": 386,
     "file_type": 3,
     "flags": 0,
     "format": "PFH4",
-    "pack_size": 104015,
+    "pack_size": 85539,
     "paths": [
       "db/effect_bundles_tables/wr2_world_resistance",
       "db/effect_bundles_to_effects_junctions_tables/wr2_world_resistance",
@@ -15,10 +15,10 @@
       "db/message_event_strings_tables/wr2_world_resistance",
       "db/message_events_tables/wr2_world_resistance",
       "lua_scripts/all_scripted.lua",
-      "script/campaign/wr2/wr2_world_resistance.lua",
+      "lua_scripts/wr2_world_resistance.lua",
       "text/db/wr2_world_resistance.loc"
     ],
-    "sha256": "a2435188985fd93bb9b3998f2201ec9f3ed77f8001d59bf8cf3275750ad60f31",
+    "sha256": "9ca3cf59de7d1851110994917b43a777b46f5adf05c7b61e274439669fbada4e",
     "timestamp": 0,
     "valid": true
   },
@@ -26,8 +26,8 @@
     "fame_tsv_sha256": "6247489e644f60826e91bf38303b4dd7570bda247addb1e8f2351b0103fbfe78",
     "localisation_tsv_sha256": "91012e2e80d8f5aee238175ed4ae0be354077d4f43d2b530cb463e17a076dc52",
     "lua_sha256": {
-      "lua_scripts/all_scripted.lua": "6326064278a7b44ff12bec71bdd7875535928bc3bca50b46d316d09573a778c1",
-      "script/campaign/wr2/wr2_world_resistance.lua": "aaebc64873a49f89b82ebee8f756ce705bd12a2e750f677687459ee8f794ac0f"
+      "lua_scripts/all_scripted.lua": "ab564ad1d1825f5af54d62bd3726e4161052243b114c996b3287707566148f76",
+      "lua_scripts/wr2_world_resistance.lua": "84204f96c5b754b9f74c8beaebc8cf45a6f7b823358b59ebd5c3e998c31823f6"
     },
     "matrix_csv_sha256": "337a4e30ce7258b5efb8e110ba36e66bee30e8d6604b05b0027b5a79e17ba7aa",
     "matrix_json_sha256": "12526c2102d85cbda2a9f5e73dbb6a6b96f067f15867c07dd76fbf07e838dff7",
@@ -35,31 +35,7 @@
     "message_events_tsv_sha256": "61f8edbb013be27ebc8bd43298d6a99c1466ce917d1fd1eae2aa65a12c296c75",
     "schema_sha256": "cbdb4f74265958ea77da2789e15093c7d12c441a7660cf95cba09e3cf5d6eecf"
   },
-  "payload_provenance": {
-    "added_paths": [
-      "script/campaign/wr2/wr2_world_resistance.lua"
-    ],
-    "base_pack_sha256": "9ca3cf59de7d1851110994917b43a777b46f5adf05c7b61e274439669fbada4e",
-    "base_release": "0.1.1-beta",
-    "mode": "lua_only_hotfix_from_rpfm_verified_base",
-    "modified_paths": [
-      "lua_scripts/all_scripted.lua"
-    ],
-    "prior_report": "validation/build_report_v0.1.1.json",
-    "removed_paths": [
-      "lua_scripts/wr2_world_resistance.lua"
-    ],
-    "rpfm_revalidated_this_hotfix": false,
-    "unchanged_payload_sha256": {
-      "db/effect_bundles_tables/wr2_world_resistance": "6d5705a464baa2b948d80fd9497dac52b760beedbd870257f09e0e2b2a7667fb",
-      "db/effect_bundles_to_effects_junctions_tables/wr2_world_resistance": "6c2db45a7fe21ac7bb91d445a6b8f9603dac04b50876ee8f0fd9b85bff002c81",
-      "db/fame_levels_tables/wr2_world_resistance": "cc9f306b86ab361e77edcdd2afcc159f0e48e00e981c18fff237f2dd44f7013f",
-      "db/message_event_strings_tables/wr2_world_resistance": "0397336f316393b3c575e6af4c4ebf57f79e25a530416dee7fe607bf388f5352",
-      "db/message_events_tables/wr2_world_resistance": "076c6f666442f4150a4c6f248c83c1e31e4cb671dde3fe52a59c47723f123b8f",
-      "text/db/wr2_world_resistance.loc": "a36f0f28f83cfdaae41cf8ac49e19efcd32cf2a180457fe5e0f9547905916a03"
-    }
-  },
-  "release_version": "0.1.4-beta",
+  "release_version": "0.1.1-beta",
   "rpfm_encode": {
     "container": {
       "bitmask": "",
@@ -91,21 +67,9 @@
         "None",
         null
       ]
-    },
-    "rpfm_reencoded_this_hotfix": false,
-    "validation_scope": "Inherited for six byte-identical DB/Loc payloads from 0.1.1-beta."
+    }
   },
   "rpfm_reopen": {
-    "base_rpfm_tree_paths": [
-      "db/effect_bundles_tables/wr2_world_resistance",
-      "db/effect_bundles_to_effects_junctions_tables/wr2_world_resistance",
-      "db/fame_levels_tables/wr2_world_resistance",
-      "db/message_event_strings_tables/wr2_world_resistance",
-      "db/message_events_tables/wr2_world_resistance",
-      "lua_scripts/all_scripted.lua",
-      "lua_scripts/wr2_world_resistance.lua",
-      "text/db/wr2_world_resistance.loc"
-    ],
     "container": {
       "bitmask": "",
       "compress": "None",
@@ -145,40 +109,23 @@
       "message_event_strings": "message_event_strings.tsv",
       "message_events": "message_events.tsv"
     },
-    "final_tree_paths": [
-      "db/effect_bundles_tables/wr2_world_resistance",
-      "db/effect_bundles_to_effects_junctions_tables/wr2_world_resistance",
-      "db/fame_levels_tables/wr2_world_resistance",
-      "db/message_event_strings_tables/wr2_world_resistance",
-      "db/message_events_tables/wr2_world_resistance",
-      "lua_scripts/all_scripted.lua",
-      "script/campaign/wr2/wr2_world_resistance.lua",
-      "text/db/wr2_world_resistance.loc"
-    ],
     "game_selection": {
       "CompressionFormatDependenciesInfo": [
         "None",
         null
       ]
     },
-    "rpfm_revalidated_this_hotfix": false,
-    "unexpected_diagnostics": [],
-    "validation_scope": "Inherited for six byte-identical RPFM-verified DB/Loc payloads; the new PFH4 container was independently reopened by tools/pfh4.py."
-  },
-  "runtime_contract": {
-    "bootstrap_log_path": "wr2_world_resistance_bootstrap.log",
-    "diagnostic_log_path": "data/wr2_world_resistance.log",
-    "director_module_path": "script/campaign/wr2/wr2_world_resistance.lua",
-    "director_require_name": "wr2_world_resistance",
-    "director_version": 6,
-    "initialization_event": "FirstTickAfterWorldCreated",
-    "initialization_retry": "human_FactionTurnStart",
-    "interface_binding": "lazy_existing_episodic_state",
-    "listener_idempotence": "registry_and_callback_identity",
-    "listener_partial_retry": "attached_callback_or_repeated_setup",
-    "listener_registration": "explicit_loader_setup_with_exported_registry",
-    "pack_filename": "@wr2_world_resistance.pack",
-    "telemetry_schema": 1
+    "tree_paths": [
+      "db/effect_bundles_tables/wr2_world_resistance",
+      "db/effect_bundles_to_effects_junctions_tables/wr2_world_resistance",
+      "db/fame_levels_tables/wr2_world_resistance",
+      "db/message_event_strings_tables/wr2_world_resistance",
+      "db/message_events_tables/wr2_world_resistance",
+      "lua_scripts/all_scripted.lua",
+      "lua_scripts/wr2_world_resistance.lua",
+      "text/db/wr2_world_resistance.loc"
+    ],
+    "unexpected_diagnostics": []
   },
   "target": {
     "campaign": "main_rome",
