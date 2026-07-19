@@ -4,7 +4,7 @@ World Resistance is a standalone anti-steamroll campaign mod. As the human empir
 
 The intended end state is deliberately unfair: once the human is a hegemon, the rest of the world can build, recruit, replenish, research, and finance near-peer armies at extreme speed, while AI factions increasingly cooperate with one another.
 
-> **Release status: 0.1.4 pre-PANTHEON beta.** This registry-handoff hotfix targets the current public Grand Campaign (`main_rome`) as researched through 2026-07-19. It has not yet completed a successful live activation test. Read [Compatibility and testing](docs/COMPATIBILITY_AND_TESTING.md) before using it in a campaign you care about.
+> **Release status: 0.1.5 pre-PANTHEON beta.** The 0.1.4 live trace proved that the loader, exact event-registry handoff, all six listeners, event delivery, and campaign interface now work in Rome II. It also exposed a separate campaign-identification error before any scaling command ran. Release 0.1.5 corrects that boundary and targets the current public Grand Campaign (`main_rome`) as researched through 2026-07-19. It still requires a successful live reconciliation test; read [Compatibility and testing](docs/COMPATIBILITY_AND_TESTING.md) before using it in a campaign you care about.
 
 ## What it does
 
@@ -35,6 +35,8 @@ At maximum pressure, a severely behind AI receives the Tier 100 package plus Cat
 
 This does not guarantee that the campaign AI will make perfect decisions. It gives every AI the legal capacity, money, throughput, resilience, and diplomatic protection needed to remain dangerous.
 
+Rome II's diplomacy power bar primarily reflects military forces already fielded. World Resistance does **not** create armies or instantly fill existing armies with units, so that bar is not an immediate activation indicator. Once reconciliation succeeds, recruitment capacity, cost, rank, replenishment, treasury, and the legal army cap let every AI build toward parity through normal campaign recruitment. A weak faction—especially in a save that began without WR—can therefore remain visibly weak for several turns while mobilizing.
+
 ## Installation
 
 1. Close Rome II.
@@ -57,13 +59,13 @@ The **No Civil War** and **Stable Politics** mods are DB-only and do not replace
 
 With the game closed, first move or delete any old WR logs so the new session is unambiguous. Enable only `@wr2_world_resistance.pack`, then launch a disposable Grand Campaign or a **copy** of an existing `main_rome` save. Confirm that the activation message appears, inspect both logs described below, end one turn, save and load, and return from a battle. Then run several AI turns before adding any other mods.
 
-A copied, mid-flight original Grand Campaign is valid for proving that 0.1.4 attaches and activates: the script reconciles the world after that save loads. It cannot retroactively give the AI the development time it would have received on earlier turns, however. A new Grand Campaign on Normal campaign difficulty remains the supported balance path for the intended full-campaign experience.
+A copied, mid-flight original Grand Campaign is valid for proving that 0.1.5 attaches and activates: the script reconciles the world after that save loads. It cannot retroactively give the AI the development time it would have received on earlier turns, however. A new Grand Campaign on Normal campaign difficulty remains the supported balance path for the intended full-campaign experience.
 
 Do not add or remove this beta in the middle of an important campaign. Removing an army-cap override while an AI owns more forces than its restored cap has not been validated.
 
 ## How to verify it is running
 
-Release 0.1.4 has two separate, local-only logs. The first starts in the root loader, before the campaign interface exists:
+Release 0.1.5 has two separate, local-only logs. The first starts in the root loader, before the campaign interface exists:
 
 ```text
 ...\Total War Rome II\wr2_world_resistance_bootstrap.log
@@ -104,14 +106,17 @@ EVENT_HIT_LoadingGame
 ENGINE_READY
 EVENT_HIT_UICreated
 EVENT_HIT_FirstTickAfterWorldCreated
+WORLD_ATTEMPT
+DIAGNOSTIC_SINK_READY
+WORLD_STATE
 WORLD_READY
 ```
 
-A new campaign need not emit `EVENT_HIT_LoadingGame`, and the first event that can see the interface may vary. `FirstTickAfterWorldCreated` is the normal activation point. If the interface or campaign world is temporarily unavailable, the log records `ENGINE_UNAVAILABLE_<event>` or `WORLD_WAIT`; the first human `FactionTurnStart` then retries and should reach `WORLD_READY`. `DIRECTOR_ROUTE_ERROR` or `DIRECTOR_REQUIRE_ERROR` means the protected director import failed. `DIRECTOR_API_ERROR`, `DIRECTOR_SETUP_ERROR`, or `DIRECTOR_SETUP_PARTIAL` means the module imported but listener attachment was not accepted.
+A new campaign need not emit `EVENT_HIT_LoadingGame`, and the first event that can see the interface may vary. `FirstTickAfterWorldCreated` is the normal activation point. Every attempt now emits `WORLD_ATTEMPT`; a failed probe is followed by the specific `WORLD_PROBE_FAIL`, `WORLD_UNSUPPORTED`, or `WORLD_NO_HUMAN` reason and then `WORLD_WAIT`. Until initialization succeeds, the first delivered `FactionTurnStart` in each campaign turn retries regardless of whether that event's context faction is human or AI; the world scan itself finds and protects the human. `DIRECTOR_ROUTE_ERROR` or `DIRECTOR_REQUIRE_ERROR` means the protected director import failed. `DIRECTOR_API_ERROR`, `DIRECTOR_SETUP_ERROR`, or `DIRECTOR_SETUP_PARTIAL` means the module imported but listener attachment was not accepted.
 
-The latest attached file contains historical 0.1.2 lines followed by **two separate 0.1.3 load IDs**. Each 0.1.3 block reaches `DIRECTOR_ROUTE_OK` and `DIRECTOR_REQUIRE_OK`, so 0.1.3 fixed the custom-module route. Neither block reaches `LISTENERS_READY` or any `EVENT_HIT_*` stage. The repeated boundary shows that successful import was not successful attachment. Source inspection identifies the remaining defect: the imported director tried to rediscover `events` through its own global environment instead of receiving the exact registry already held by the root loader. This happens before save inspection or World Resistance campaign mutation, so the trace does not implicate the existing save or the DB-only No Civil War mod. Version 0.1.4 adds the explicit registry handoff.
+The latest attached bootstrap file gives a complete 0.1.4 diagnosis. One load ID has matching registry identities, all six `LISTENER_OK_*` stages, `LISTENERS_READY`, `DIRECTOR_SETUP_OK`, several `EVENT_HIT_*` stages, and `ENGINE_READY`. Attachment and dispatch therefore succeeded. It then reaches `EVENT_HIT_FirstTickAfterWorldCreated` and `WORLD_WAIT`, but never `WORLD_READY`. The audited Rome II model API defines `campaign_name(key)` as a boolean predicate; 0.1.4 incorrectly called `campaign_name()` as a zero-argument string getter and consequently rejected the valid `main_rome` world before applying bundles or treasury grants. Release 0.1.5 calls `campaign_name("main_rome")` and exposes the reason for every failed world probe.
 
-For the clean retest, close Rome II, move or delete the old bootstrap log, verify that only the new WR pack is installed and enabled, and start or load a copied original Grand Campaign. The new file should contain only 0.1.4 lines. For one load ID, require a successful route, `DIRECTOR_SETUP_TRY`, both matching `EVENT_REGISTRY_READY` stages, six `LISTENER_OK_*` stages, `LISTENERS_READY`, and `DIRECTOR_SETUP_OK`; then require at least one later `EVENT_HIT_...`, `ENGINE_READY`, and finally `WORLD_READY`. If several load IDs appear, evaluate each ID separately rather than combining milestones from different blocks.
+For the clean retest, close Rome II, move or delete the old bootstrap log, verify that only the new WR pack is installed and enabled, and start or load a copied original Grand Campaign. The new file should contain only 0.1.5 lines. For one load ID, require a successful route, `DIRECTOR_SETUP_TRY`, both matching `EVENT_REGISTRY_READY` stages, six `LISTENER_OK_*` stages, `LISTENERS_READY`, and `DIRECTOR_SETUP_OK`; then require at least one later `EVENT_HIT_...`, `ENGINE_READY`, `WORLD_ATTEMPT`, `WORLD_STATE`, and finally `WORLD_READY`. `DIAGNOSTIC_SINK_READY` confirms the detailed file opened; `DIAGNOSTIC_SINK_ERROR` identifies a real file-sink failure without disabling gameplay. If several load IDs appear, evaluate each ID separately rather than combining milestones from different blocks.
 
 The second log begins only after the director completes a supported Grand Campaign reconciliation:
 
@@ -124,12 +129,12 @@ It writes one `STATE` record per human turn, plus a faction-by-faction audit at 
 For example:
 
 ```text
-WR2|schema=1|event=STATE|release=0.1.4-beta|director=6|campaign=main_rome|turn=42|human=rom_rome|human_regions=61|world_regions=173|map_pct=35|armies=16|treasury=245000|imperium=7|pressure=70|floor=65|tier=65|tier_index=3|desired_tier=65|diplomacy_peak=65|active_ai=34|target_armies=16|catchup_0=4|catchup_1=8|catchup_2=11|catchup_3=11|base_commands_ok=34|catchup_commands_ok=34
+WR2|schema=1|event=STATE|release=0.1.5-beta|director=7|campaign=main_rome|turn=42|human=rom_rome|human_regions=61|world_regions=173|map_pct=35|armies=16|treasury=245000|imperium=7|pressure=70|floor=65|tier=65|tier_index=3|desired_tier=65|diplomacy_peak=65|active_ai=34|target_armies=16|catchup_0=4|catchup_1=8|catchup_2=11|catchup_3=11|base_commands_ok=34|catchup_commands_ok=34|bundle_changes=68|grant_count=31|grant_total=2450000
 ```
 
-An `AI` record identifies the selected base/catch-up bundles, treasury target and grant for each active AI. `base_command_ok=true` means the engine call returned without a Lua exception and the director cached that selection; Rome II exposes no audited effect-bundle readback API, so it is not an independent native-state query.
+An `AI` record identifies the selected base/catch-up bundles, treasury target and grant for each active AI. `base_command_ok=true` means the engine call returned without a Lua exception and the director cached that selection; Rome II exposes no audited effect-bundle readback API, so it is not an independent native-state query. The bootstrap `WORLD_STATE` summary independently makes the activation boundary visible and reports the active-AI count, accepted base/catch-up bundle commands, treasury grant count/total, pressure, tier, and target armies.
 
-If neither file appears, first confirm that the exact `@wr2_world_resistance.pack` is enabled and that the old pack is absent. A protected game directory can also deny file creation: both file sinks fail closed and cannot stop the campaign. In that case, the campaign message still proves that the director completed a reconciliation, and the same compact traces are sent to Rome II's native `out.ting` logging sink when available. A bootstrap log that reaches `LISTENERS_READY` and `DIRECTOR_SETUP_OK` but never produces an `EVENT_HIT_*`, `WORLD_READY`, or detailed `SESSION_START`/`STATE` calls for checking event dispatch, the supported original Grand Campaign (`main_rome`), and detailed-log write access in that order.
+If the bootstrap file is absent, first confirm that the exact `@wr2_world_resistance.pack` is enabled and the old pack is absent; a protected installation root can also prevent that file from opening. If the bootstrap exists but the detailed `data/wr2_world_resistance.log` does not, read the world stages before blaming the path. The attached 0.1.4 run had no detailed file because reconciliation never succeeded—it stopped at `WORLD_WAIT`—not because `data` was unwritable. In 0.1.5, `DIAGNOSTIC_SINK_READY` or `DIAGNOSTIC_SINK_ERROR` explicitly settles the file-write question. Both sinks fail closed and cannot stop the campaign, and compact traces are also sent to Rome II's native `out.ting` sink when available.
 
 ## Design summary
 
@@ -143,6 +148,7 @@ Full mechanics and numbers are in [Design](docs/DESIGN.md).
 - The forthcoming PANTHEON/JUPITER branch changes Imperium and army-cap assumptions and needs a separate adapter. This pack intentionally encodes the backward-compatible `fame_levels` v4 Grand Campaign row shape found in decoded stable Rome II packs. The RPFM schema also contains later table layouts, but their presence predates PANTHEON and is not evidence that they describe the forthcoming update.
 - The ordinary AI-to-AI war path is disabled at high pressure, but a hard-coded campaign incident could bypass normal diplomacy. The script listens for declarations and forces AI peace again; only live soak testing can prove complete coverage.
 - The API can enable and protect alliances, but there is no audited Rome II command that instantly creates an alliance. Universal alliance formation is encouraged, not guaranteed.
+- The diplomacy power bar measures already-fielded military strength, not WR's treasury, construction, research, or future recruitment capacity. Because WR deliberately does not spawn units or armies, parity develops through accelerated legal recruitment rather than appearing instantly after activation.
 - `-90%` reducers can stack with campaign difficulty, technologies, traits, or other mods. Normal campaign difficulty is the initial balance target; higher difficulties require a live economy test.
 - A protected Lua call can contain a Lua error, but it cannot catch a native engine crash.
 - The status message uses a custom English localization file. A non-English installation may display missing/fallback text; that should be cosmetic, but still needs a live locale test.

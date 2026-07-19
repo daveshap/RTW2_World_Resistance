@@ -17,7 +17,7 @@ class ReleaseReportTests(unittest.TestCase):
         cls.report = json.loads(REPORT_PATH.read_text(encoding="utf-8"))
 
     def test_release_and_target(self) -> None:
-        self.assertEqual(self.report["release_version"], "0.1.4-beta")
+        self.assertEqual(self.report["release_version"], "0.1.5-beta")
         self.assertEqual(self.report["target"]["game"], "rome_2")
         self.assertEqual(self.report["target"]["campaign"], "main_rome")
 
@@ -38,7 +38,7 @@ class ReleaseReportTests(unittest.TestCase):
     def test_runtime_and_manual_pack_contract(self) -> None:
         runtime = self.report["runtime_contract"]
         self.assertEqual(runtime["pack_filename"], "@wr2_world_resistance.pack")
-        self.assertEqual(runtime["director_version"], 6)
+        self.assertEqual(runtime["director_version"], 7)
         self.assertEqual(runtime["telemetry_schema"], 1)
         self.assertEqual(
             runtime["bootstrap_log_path"], "wr2_world_resistance_bootstrap.log"
@@ -63,8 +63,18 @@ class ReleaseReportTests(unittest.TestCase):
             "attached_callback_or_repeated_setup",
         )
         self.assertEqual(runtime["interface_binding"], "lazy_existing_episodic_state")
+        self.assertEqual(
+            runtime["campaign_detection"], "campaign_name_predicate_main_rome"
+        )
         self.assertEqual(runtime["initialization_event"], "FirstTickAfterWorldCreated")
-        self.assertEqual(runtime["initialization_retry"], "human_FactionTurnStart")
+        self.assertEqual(
+            runtime["initialization_retry"],
+            "first_FactionTurnStart_each_campaign_turn",
+        )
+        self.assertEqual(
+            runtime["world_diagnostics"],
+            "reasoned_bootstrap_state_and_sink_status",
+        )
         self.assertEqual(
             sorted(path.name for path in (ROOT / "dist").glob("*.pack")),
             ["@wr2_world_resistance.pack"],
@@ -102,12 +112,24 @@ class ReleaseReportTests(unittest.TestCase):
             "LISTENERS_READY",
             "EVENT_HIT_",
             "WORLD_READY",
+            "WORLD_ATTEMPT",
+            "WORLD_PROBE_FAIL",
+            "WORLD_UNSUPPORTED",
+            "WORLD_NO_HUMAN",
+            "WORLD_STATE",
+            "FACTION_TURN_CONTEXT",
+            "DIAGNOSTIC_SINK_READY",
+            "DIAGNOSTIC_SINK_ERROR",
         ):
             self.assertIn(milestone, loader + director)
-        self.assertIn('local VERSION = 6', director)
+        self.assertIn('local VERSION = 7', director)
         self.assertIn("return director.setup(event_registry)", loader)
         self.assertIn("WR.setup = setup", director)
         self.assertNotIn('rawget(_G, "events")', director)
+        self.assertIn(
+            "return model:campaign_name(WR.config.supported_campaign)", director
+        )
+        self.assertNotIn("return model:campaign_name()", director)
         self.assertNotIn('require, "lua_scripts.EpisodicScripting"', director)
         self.assertIn('rawget(_G, "EpisodicScripting")', director)
         self.assertIn('diagnostic_log_path = "data/wr2_world_resistance.log"', director)

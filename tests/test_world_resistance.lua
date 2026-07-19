@@ -123,7 +123,7 @@ local telemetry = WR.telemetry_line("STATE", {
     { "number", 42 }
 })
 assert_true(
-    string.find(telemetry, "WR2|schema=1|event=STATE|release=0.1.4-beta|director=6", 1, true) == 1,
+    string.find(telemetry, "WR2|schema=1|event=STATE|release=0.1.5-beta|director=7", 1, true) == 1,
     "telemetry prefix is versioned and deterministic"
 )
 assert_true(

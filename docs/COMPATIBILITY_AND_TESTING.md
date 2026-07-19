@@ -32,11 +32,11 @@ World Resistance is self-contained in one pack and needs no framework or compani
 | Total campaign overhaul | Unsupported | Campaign key, region count, DB rows, and loader assumptions may differ |
 | Startpos or force-spawning mod | Unsupported combination | Harder to isolate lifecycle and cap failures |
 
-Rome II's `all_scripted.lua` does not have a safe automatic multi-mod append mechanism. A compatibility patch must preserve the seven vanilla imports, assign `events = triggers.events`, and protected-load both mods after that assignment. World Resistance 0.1.4 must also receive the exact shared registry through `director.setup(triggers.events)`; merely assigning an `events` global is not a verified cross-module handoff.
+Rome II's `all_scripted.lua` does not have a safe automatic multi-mod append mechanism. A compatibility patch must preserve the seven vanilla imports, assign `events = triggers.events`, and protected-load both mods after that assignment. World Resistance 0.1.5 must also receive the exact shared registry through `director.setup(triggers.events)`; merely assigning an `events` global is not a verified cross-module handoff.
 
 The inspected Stable Politics presets do not replace `all_scripted.lua` and do not share a primary key with World Resistance. Their relative launcher order should therefore be immaterial. Complete the World Resistance-only smoke test first, then enable exactly one Stable Politics preset and repeat the first-turn/end-turn check; this remains a compatibility expectation until both packs have been exercised together in a live Rome II installation.
 
-## 0.1.1–0.1.3 startup defects and 0.1.4 repair
+## 0.1.1–0.1.4 activation defects and 0.1.5 repair
 
 Release 0.1.1 imported the director before Rome II had exposed `scripting.game_interface`. When the interface was absent, the adapter returned without registering its campaign listeners and had no retry path. That made the mod silent and mechanically inert on both a new campaign and a loaded campaign. Starting a new campaign could not repair that defect.
 
@@ -44,9 +44,13 @@ Release 0.1.2 kept the root loader alive but assumed that appending a function t
 
 Release 0.1.3 fixed the module route: its loader temporarily prepended `script/campaign/wr2/?.lua`, required the simple module name, and restored the prior path. The second native trace confirms that route succeeded in two separate 0.1.3 load IDs. Both blocks nevertheless stopped after `DIRECTOR_REQUIRE_OK`, with no `LISTENERS_READY` or event hit. The director had attempted to find `events` through its own `_G`; the live runtime did not demonstrate that the root loader's global assignment was visible in that imported environment.
 
-Release 0.1.4 preserves the proven route but adds an explicit API boundary. The imported module returns `WR`, the loader checks its `setup` function, and calls `director.setup(triggers.events)` with dot-call semantics. Listener registration uses only that argument and records the registry identity; it does not rediscover `_G.events`. Setup remains independent of `game_interface`. Every registered callback lazily checks the campaign-owned global and already-loaded module variants for the interface. `FirstTickAfterWorldCreated` remains the normal activation edge; if the interface or world is still unavailable, the first human `FactionTurnStart` retries initialization. `LoadingGame` remains read-only, and no bundle, treasury, or diplomacy mutation occurs before successful world initialization.
+Release 0.1.4 preserved the proven route and added an explicit API boundary. The imported module returns `WR`, the loader checks its `setup` function, and calls `director.setup(triggers.events)` with dot-call semantics. Listener registration uses only that argument and records the registry identity; it does not rediscover `_G.events`. The latest live trace proves that this boundary works: it contains matching registry identities, all six listener successes, multiple event hits, and `ENGINE_READY`.
 
-The 0.1.4 regression simulation isolates the director from a global `events` value, verifies that the exact `triggers.events` argument receives all six callbacks, and covers repeated setup, partial registration, retry without duplicates, delayed-interface recovery, the existing-save path, and rejection of an AI-turn fallback. This is still simulated evidence. The build environment has no runnable Rome II executable.
+The 0.1.4 director nevertheless stopped at `WORLD_WAIT`. Rome II's model API exposes `campaign_name(key)` as a boolean predicate. The director incorrectly called `campaign_name()` as if it were a zero-argument string getter, then rejected the valid Grand Campaign before any bundle, treasury, or diplomacy mutation.
+
+Release 0.1.5 calls `model:campaign_name("main_rome")`, keeps `LoadingGame` read-only, and retains `FirstTickAfterWorldCreated` as the normal activation edge. If initialization is still incomplete, the first delivered `FactionTurnStart` in each campaign turn retries regardless of that context faction's human/AI status; the complete world scan performs supported-campaign detection, finds the human, and enforces human isolation. This avoids requiring the first retry context to be recognized as human before the world has initialized.
+
+The regression simulations isolate the director from a global `events` value, verify that the exact `triggers.events` argument receives all six callbacks, and cover repeated setup, partial registration, retry without duplicates, delayed-interface recovery, the existing-save path, the `campaign_name("main_rome")` predicate, and per-turn faction-turn recovery. These are simulated control-flow checks. The 0.1.4 trace is native evidence for routing, attachment, dispatch, and interface acquisition; 0.1.5 still needs native evidence for successful world reconciliation and effects.
 
 ## Why Normal campaign difficulty is the initial target
 
@@ -63,10 +67,10 @@ The source was designed and checked against:
 - a current Rome II scripting API and event dump;
 - Rome II's evidenced `all_scripted.lua` → campaign `scripting.lua` load order, an explicit pack-local module path, an explicit `triggers.events` argument handoff, and lazy interface discovery;
 - Rome II's documented three-argument custom message-event path and a working Workshop implementation exported through RPFM;
-- Lua 5.1 syntax and pure/mocked simulations, including no-interface import, delayed interface publication, first-human-turn recovery, all-faction eligibility, and the no-human-diplomacy invariant;
+- Lua 5.1 syntax and pure/mocked simulations, including no-interface import, delayed interface publication, first-faction-turn-per-campaign-turn recovery, all-faction eligibility, and the no-human-diplomacy invariant;
 - deterministic PFH4 structure tests and pack round-trip tooling.
 
-These checks reduce guessed-key and malformed-pack risk. They cannot verify native engine behavior. This environment does not contain the paid Rome II data depot, Assembly Kit dependency cache, or a runnable Rome II executable, so this beta has **not** completed a real frontend cold boot, first turn, end turn, battle return, or soak test.
+These checks reduce guessed-key and malformed-pack risk. The user's 0.1.4 trace adds native proof of loader selection, listener attachment, event dispatch, and interface acquisition, but not successful scaling. This environment does not contain the paid Rome II data depot, Assembly Kit dependency cache, or a runnable Rome II executable, so this beta has **not** completed a successful native world reconciliation, effect verification, end-turn sequence, battle return, or soak test.
 
 Treat any generated validation report as structural evidence, not an in-game certification.
 
@@ -78,12 +82,12 @@ Use a disposable profile or backed-up saves. Test with no other mods before comb
 2. Put `@wr2_world_resistance.pack` in `data` and enable only that pack.
 3. Cold-start to the main menu. A failure before the menu points first to pack/schema/loader conflicts.
 4. Start a new original Grand Campaign and reach the first human turn.
-5. Open `wr2_world_resistance_bootstrap.log` in the Rome II installation root, one directory above `data`. For release 0.1.4, one load ID must contain `LOADER_START`, loader-owned `EVENT_REGISTRY_READY` with detail `source=export_triggers`, `MODULE_PATH_READY`, `DIRECTOR_ROUTE_TRY`, `DIRECTOR_ROUTE_OK`, `DIRECTOR_REQUIRE_OK`, `DIRECTOR_SETUP_TRY`, director-owned `EVENT_REGISTRY_READY` with detail `source=loader_argument`, all six `LISTENER_OK_*` stages, `LISTENERS_READY`, and `DIRECTOR_SETUP_OK`. The opaque `registry=` identity in the two ready lines must match. After campaign dispatch begins it must also reach an `EVENT_HIT_*`, `ENGINE_READY`, and `WORLD_READY`. An early `ENGINE_WAIT|detail=director_setup` is expected when `all_scripted.lua` precedes the campaign interface; it is only a failure if no later event reaches `ENGINE_READY`.
+5. Open `wr2_world_resistance_bootstrap.log` in the Rome II installation root, one directory above `data`. For release 0.1.5, one load ID must contain `LOADER_START`, loader-owned `EVENT_REGISTRY_READY` with detail `source=export_triggers`, `MODULE_PATH_READY`, `DIRECTOR_ROUTE_TRY`, `DIRECTOR_ROUTE_OK`, `DIRECTOR_REQUIRE_OK`, `DIRECTOR_SETUP_TRY`, director-owned `EVENT_REGISTRY_READY` with detail `source=loader_argument`, all six `LISTENER_OK_*` stages, `LISTENERS_READY`, and `DIRECTOR_SETUP_OK`. The opaque `registry=` identity in the two ready lines must match. After campaign dispatch begins it must also reach an `EVENT_HIT_*`, `ENGINE_READY`, `WORLD_ATTEMPT`, `WORLD_STATE`, and `WORLD_READY`. An early `ENGINE_WAIT|detail=director_setup` is expected when `all_scripted.lua` precedes the campaign interface; it is only a failure if no later event reaches `ENGINE_READY`.
 6. Confirm a **WORLD RESISTANCE ACTIVE** message appears only after the campaign map finishes reconciling.
-7. Open `data/wr2_world_resistance.log`. Confirm it contains one `SESSION_START`, one `STATE`, and an `AI_AUDIT_BEGIN`/`AI`/`AI_AUDIT_END` block for the current turn. This detailed file is deliberately not created until a supported world has reconciled successfully.
+7. Confirm the same bootstrap block contains `DIAGNOSTIC_SINK_READY`, then open `data/wr2_world_resistance.log`. Confirm it contains one `SESSION_START`, one `STATE`, and an `AI_AUDIT_BEGIN`/`AI`/`AI_AUDIT_END` block for the current turn. This detailed file is deliberately not created until a supported world has reconciled successfully. `DIAGNOSTIC_SINK_ERROR` is explicit evidence of a file problem; absence of the detailed file before `WORLD_STATE` is not.
 8. Confirm the human receives none of the nine `wr2_wr_` bundles and no treasury grant.
 9. In the audit block, inspect several neutral, allied, client, distant, and hostile AI factions. Every active AI should have a base selection; weak ones should have a catch-up selection as well.
-10. Confirm an AI can legally raise armies toward the 16-army cap without any spawned or duplicate force.
+10. Confirm an AI can legally raise armies toward the 16-army cap without any spawned or duplicate force. Do not use the diplomacy power bar as an instant activation test: it reflects forces already fielded, and WR accelerates normal recruitment rather than creating armies.
 11. End at least one full turn and watch for a freeze during the faction sequence. Confirm exactly one new `STATE` line appears for the next human turn.
 12. Save, exit to menu, reload, and verify the acknowledged tier popup does not repeat, bundles do not duplicate, and treasury is not granted repeatedly within one turn.
 13. Enter a battle, return to campaign, and continue an AI turn.
@@ -104,15 +108,17 @@ Use a disposable profile or backed-up saves. Test with no other mods before comb
 - `LISTENER_MISSING_*` or `LISTENER_INSERT_ERROR_*`, followed by `LISTENERS_PARTIAL` and `DIRECTOR_SETUP_PARTIAL`, is a failed attachment attempt. A later attempt must visibly recover the missing listener and reach the ready/OK outcomes.
 - `EVENT_HIT_<name>` proves Rome II dispatched that event-table callback. `EVENT_ERROR_<name>` means its protected body failed and supplies the failure boundary.
 - `ENGINE_WAIT` or `ENGINE_UNAVAILABLE_<name>` means no published interface was found at that attempt; a later lifecycle event retries. `ENGINE_READY` proves the interface was acquired and records which global/module source and event supplied it.
-- `WORLD_WAIT` means first-tick reconciliation could not yet see a supported world; only the first human faction turn may retry one-time initialization. `WORLD_READY` proves that reconciliation completed.
-- `DIRECTOR_SETUP_OK` with no `EVENT_HIT_*` means attachment was accepted but no registered callback was observed. `LISTENERS_READY` and an event hit with no `WORLD_READY` or detailed `SESSION_START` after first tick and the first human turn means supported-world reconciliation did not complete, or the detailed file could not be written. Check native `out.ting` output for the reason.
+- `WORLD_ATTEMPT` is emitted for every initialization attempt. `WORLD_PROBE_FAIL` names an unavailable game/model/world/faction-list probe, `WORLD_UNSUPPORTED` means `campaign_name("main_rome")` returned false, and `WORLD_NO_HUMAN` means the world was readable but no human faction was detected. `WORLD_WAIT` repeats the reason. Until ready, the first delivered faction turn in each campaign turn retries regardless of the context faction's humanity. `WORLD_READY` proves that reconciliation completed.
+- `WORLD_STATE` is the compact successful-reconciliation proof. It includes active AI, accepted base/catch-up bundle-command counts, treasury grant count/total, pressure/tier, and target armies.
+- `DIAGNOSTIC_SINK_READY` proves the detailed file opened and wrote. `DIAGNOSTIC_SINK_ERROR` is a real path/permission/write failure and does not disable mechanics.
+- `DIRECTOR_SETUP_OK` with no `EVENT_HIT_*` means attachment was accepted but no registered callback was observed. `LISTENERS_READY` and an event hit with no `WORLD_READY`, `WORLD_STATE`, or detailed `SESSION_START` means supported-world reconciliation did not complete; the reasoned world stages now identify why. If `WORLD_STATE` and `WORLD_READY` exist but the detailed file does not, inspect the diagnostic-sink milestone.
 - A `SESSION_START` plus `STATE` proves the director completed a `main_rome` reconciliation and its protected calls returned; it does not independently read back native effect-bundle state.
 - A detailed `STATE` with no status message isolates the problem to UI readiness/message display rather than the scaling reconciliation.
 
 ## Specific acceptance criteria
 
 - The game reaches the campaign map from a cold process with only this pack enabled.
-- For one load ID, the bootstrap trace reaches `DIRECTOR_ROUTE_OK`, `DIRECTOR_REQUIRE_OK`, matching loader/director `EVENT_REGISTRY_READY` identities, six successful/reused listener outcomes, `LISTENERS_READY`, `DIRECTOR_SETUP_OK`, an `EVENT_HIT_*`, `ENGINE_READY`, and `WORLD_READY`; the detailed trace then reaches `SESSION_START` and `STATE` after first tick or the guarded first-human-turn retry.
+- For one load ID, the bootstrap trace reaches `DIRECTOR_ROUTE_OK`, `DIRECTOR_REQUIRE_OK`, matching loader/director `EVENT_REGISTRY_READY` identities, six successful/reused listener outcomes, `LISTENERS_READY`, `DIRECTOR_SETUP_OK`, an `EVENT_HIT_*`, `ENGINE_READY`, `WORLD_ATTEMPT`, `WORLD_STATE`, and `WORLD_READY`; the detailed trace then reaches `SESSION_START` and `STATE` after first tick or the guarded first-faction-turn-per-campaign-turn retry.
 - The activation/tier message appears after successful reconciliation, never during `LoadingGame`, and an acknowledged tier does not repeat after reload.
 - Each human turn produces at most one structured `STATE`; detailed audits include every active non-human faction exactly once and exclude the human and dormant factions.
 - Exactly one base bundle and zero or one catch-up bundle exist on every active AI.
@@ -141,6 +147,6 @@ Include:
 - exact `@wr2_world_resistance.pack` filename and SHA-256 from the release report;
 - the last successful step: menu, campaign load, first turn, end turn, save/load, or battle return;
 - the relevant `script_error` or modified log excerpt;
-- all 0.1.4 `BOOT` lines for the same `load=` identifier from installation-root `wr2_world_resistance_bootstrap.log`;
+- all 0.1.5 `BOOT` lines for the same `load=` identifier from installation-root `wr2_world_resistance_bootstrap.log`;
 - the `SESSION_START`, latest `STATE`, and surrounding `AI_AUDIT` lines from `data/wr2_world_resistance.log`;
 - whether the failure reproduces with only World Resistance enabled from a clean process.

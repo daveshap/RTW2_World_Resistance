@@ -129,8 +129,11 @@ local world = {}
 function model:world()
     return world
 end
-function model:campaign_name()
-    return "main_rome"
+function model:campaign_name(campaign_key)
+    if campaign_key ~= "main_rome" then
+        error("campaign_name must be called as the main_rome predicate")
+    end
+    return true
 end
 function model:turn_number()
     return 77

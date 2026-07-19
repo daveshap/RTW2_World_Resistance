@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build the Lua-only World Resistance 0.1.4 hotfix from the verified v0.1.1 pack.
+"""Build the Lua-only World Resistance 0.1.5 hotfix from the verified v0.1.1 pack.
 
-The 0.1.4 release keeps the explicit 0.1.3 module path and replaces its
-implicit cross-environment event lookup with WR.setup(export_triggers.events).
+The 0.1.5 release keeps the explicit 0.1.4 event-registry setup and corrects
+Rome II's campaign_name(key) boolean-predicate call plus world diagnostics.
 Its five RPFM-encoded DB tables and Loc payload are copied byte-for-byte from
 the v0.1.1 pack that was already encoded, reopened, exported, and compared
 with source under RPFM 5.0.5. This builder refuses to run unless the complete
@@ -47,11 +47,11 @@ except ImportError:
     from pfh4 import PackFormatError, read_pack, validate_pack, write_pack_file
 
 
-BUILD_TOOL_VERSION = "1.4.0-hotfix"
-RELEASE_VERSION = "0.1.4-beta"
+BUILD_TOOL_VERSION = "1.5.0-hotfix"
+RELEASE_VERSION = "0.1.5-beta"
 BASE_RELEASE_VERSION = "0.1.1-beta"
 BASE_PACK_SHA256 = "9ca3cf59de7d1851110994917b43a777b46f5adf05c7b61e274439669fbada4e"
-DIRECTOR_VERSION = 6
+DIRECTOR_VERSION = 7
 TELEMETRY_SCHEMA = 1
 PACK_FILENAME = "@wr2_world_resistance.pack"
 BOOTSTRAP_LOG_PATH = "wr2_world_resistance_bootstrap.log"
@@ -199,8 +199,10 @@ def build(
             "listener_idempotence": "registry_and_callback_identity",
             "listener_partial_retry": "attached_callback_or_repeated_setup",
             "interface_binding": "lazy_existing_episodic_state",
+            "campaign_detection": "campaign_name_predicate_main_rome",
             "initialization_event": "FirstTickAfterWorldCreated",
-            "initialization_retry": "human_FactionTurnStart",
+            "initialization_retry": "first_FactionTurnStart_each_campaign_turn",
+            "world_diagnostics": "reasoned_bootstrap_state_and_sink_status",
         },
         "inputs": current_inputs,
         "validated_contract": prior["validated_contract"],

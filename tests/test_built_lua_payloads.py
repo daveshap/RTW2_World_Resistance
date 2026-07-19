@@ -18,6 +18,7 @@ LUA_INTEGRATION_TESTS = (
     "test_loader_registry_handoff.lua",
     "test_listener_setup_recovery.lua",
     "test_loader_setup_failure.lua",
+    "test_world_activation_contract.lua",
 )
 
 

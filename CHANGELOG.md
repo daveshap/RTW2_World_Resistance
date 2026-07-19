@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.1.5-beta — 2026-07-19
+
+This is a mandatory world-reconciliation replacement for 0.1.4. The latest native trace proves that 0.1.4 successfully loaded, attached all six callbacks to the exact exported registry, received campaign events, and acquired Rome II's campaign interface. It then stopped at `WORLD_WAIT` before applying a single AI bundle or treasury grant.
+
+### Fixed
+
+- Corrected Grand Campaign detection to use Rome II's documented boolean predicate, `model:campaign_name("main_rome")`. Release 0.1.4 incorrectly called `campaign_name()` as though it were a zero-argument string getter, so even a valid original Grand Campaign was rejected before reconciliation.
+- Changed initialization recovery from “first event context already recognized as human” to the first delivered `FactionTurnStart` in each campaign turn while initialization remains incomplete. The full world scan—not the event-context faction—identifies and protects the human, so an AI turn can now recover a first-tick probe that arrived too early.
+- Preserved `LoadingGame` as read-only, `FirstTickAfterWorldCreated` as the primary activation edge, the exact `triggers.events` setup handoff, and all human-isolation guards.
+
+### Diagnostics
+
+- Added non-deduplicated `WORLD_ATTEMPT` records with attempt number and event source.
+- Split failed reconciliation into reasoned `WORLD_PROBE_FAIL`, `WORLD_UNSUPPORTED`, and `WORLD_NO_HUMAN` records, followed by `WORLD_WAIT` carrying the exact reason. This distinguishes an unavailable model/world/list from a supported-campaign predicate failure or absent human.
+- Added `DIAGNOSTIC_SINK_READY` and `DIAGNOSTIC_SINK_ERROR` bootstrap milestones. The former confirms that `data/wr2_world_resistance.log` opened and wrote; the latter reports an actual sink failure without stopping gameplay.
+- Added a compact `WORLD_STATE` bootstrap summary after every successful reconciliation. It reports campaign, turn, human faction, active-AI count, pressure/tier, accepted base and catch-up bundle commands, treasury grant count/total, and target-army signal even when the detailed file is inaccessible.
+- Bumped the release/director identifiers to `0.1.5-beta` / `7`.
+
+### Live-trace finding
+
+- The 0.1.4 registry identities match exactly, all six listeners report success, and later `EVENT_HIT_LoadingGame`, `EVENT_HIT_UICreated`, `EVENT_HIT_FirstTickAfterWorldCreated`, `EVENT_HIT_SavingGame`, `EVENT_HIT_FactionTurnStart`, and `EVENT_HIT_FactionLeaderDeclaresWar` records prove dispatch. `ENGINE_READY` proves interface acquisition. This closes the loader, registry, listener, and interface hypotheses.
+- The same block reaches `WORLD_WAIT` after first tick but never `WORLD_READY`. Source/API comparison localizes the defect to the incorrect zero-argument `campaign_name()` call.
+- The missing `data/wr2_world_resistance.log` in that run is expected: the detailed sink is first used only after supported-world reconciliation. Because reconciliation never succeeded, its absence is not evidence of a bad path or denied file permissions.
+
+### Behavior clarification
+
+- Rome II's diplomacy power bar reflects military strength already on the map. World Resistance intentionally does not spawn forces or units, so activation does not instantly raise that bar. It supplies money, legal army capacity, recruitment slots, low costs, ranks, replenishment, and other advantages; the AI still mobilizes through normal recruitment over subsequent turns.
+
 ## 0.1.4-beta — 2026-07-19
 
 This is a mandatory event-registry handoff replacement for 0.1.3. The second live bootstrap trace proved that 0.1.3 reliably found and executed its director in two fresh Lua states, but neither state registered the six campaign listeners.

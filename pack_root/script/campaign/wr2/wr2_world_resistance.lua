@@ -10,8 +10,8 @@
 --   * World mutation begins at FirstTickAfterWorldCreated, never LoadingGame.
 --   * Save data consists only of primitive values supported by Rome II.
 
-local VERSION = 6
-local RELEASE_VERSION = "0.1.4-beta"
+local VERSION = 7
+local RELEASE_VERSION = "0.1.5-beta"
 local TELEMETRY_SCHEMA = 1
 local GLOBAL_KEY = "WR2_WORLD_RESISTANCE"
 
@@ -292,7 +292,19 @@ local function append_diagnostic_lines(lines)
 end
 
 local function emit_telemetry(file_lines, native_lines)
-    local _, failure = append_diagnostic_lines(file_lines)
+    local written, failure = append_diagnostic_lines(file_lines)
+    if written then
+        emit_boot_milestone_once(
+            "DIAGNOSTIC_SINK_READY",
+            "path=" .. tostring(WR.config.diagnostic_log_path)
+        )
+    elseif failure ~= nil then
+        emit_boot_milestone_once(
+            "DIAGNOSTIC_SINK_ERROR",
+            "path=" .. tostring(WR.config.diagnostic_log_path)
+                .. ";error=" .. tostring(failure)
+        )
+    end
     if failure ~= nil and not diagnostic_sink_warning_emitted then
         diagnostic_sink_warning_emitted = true
         write_native_line(
@@ -512,6 +524,8 @@ local runtime = {
     last_audit_turn = nil,
     telemetry_session_started = false,
     war_notice_turn_by_faction = {},
+    initialization_attempt_count = 0,
+    last_initialization_faction_turn = nil,
     last_stats = nil,
     last_summary = nil
 }
@@ -632,33 +646,44 @@ end
 
 local function collect_world_stats()
     if runtime.game == nil then
-        return nil
+        return nil, "game_unavailable"
     end
     local model = safe_read("game:model", function()
         return runtime.game:model()
     end, nil)
     if model == nil then
-        return nil
+        return nil, "model_unavailable"
     end
     local world = safe_read("model:world", function()
         return model:world()
     end, nil)
     if world == nil then
-        return nil
+        return nil, "world_unavailable"
     end
     local faction_list = safe_read("world:faction_list", function()
         return world:faction_list()
     end, nil)
     if faction_list == nil then
-        return nil
+        return nil, "faction_list_unavailable"
     end
+
+    -- Rome II exposes campaign_name(key) as a boolean predicate. It is not a
+    -- zero-argument string getter (later Total War APIs added differently
+    -- named key getters). Calling it without main_rome made 0.1.4 reject every
+    -- valid Grand Campaign after otherwise-successful listener attachment.
+    local campaign_supported = safe_read(
+        "model:campaign_name:" .. WR.config.supported_campaign,
+        function()
+            return model:campaign_name(WR.config.supported_campaign)
+        end,
+        false
+    ) == true
 
     local stats = {
         model = model,
         world = world,
-        campaign = safe_read("model:campaign_name", function()
-            return model:campaign_name()
-        end, ""),
+        campaign = campaign_supported and WR.config.supported_campaign or "unsupported",
+        campaign_supported = campaign_supported,
         factions = {},
         humans = {},
         ais = {},
@@ -725,7 +750,7 @@ local function collect_world_stats()
         write_log_once("multiplayer", "Multiple human factions detected. Scaling is safe, but multiplayer balance is unsupported; territory is combined and parity uses the strongest human.")
     end
 
-    return stats
+    return stats, nil
 end
 
 
@@ -1244,22 +1269,43 @@ end
 
 local function reconcile_world(options)
     local opts = options or {}
-    local stats = collect_world_stats()
+    local source = tostring(opts.source or "unspecified")
+    local stats, probe_failure = collect_world_stats()
     if stats == nil then
-        write_log_once("no-world", "World interface unavailable; director remains inert")
-        return false
+        local reason = tostring(probe_failure or "world_stats_unavailable")
+        emit_boot_milestone(
+            "WORLD_PROBE_FAIL",
+            "source=" .. source .. ";reason=" .. reason
+        )
+        write_log_once(
+            "no-world:" .. reason,
+            "World probe failed; director remains inert until retry: " .. reason
+        )
+        return false, reason
     end
-    if stats.campaign ~= WR.config.supported_campaign then
+    if stats.campaign_supported ~= true then
+        local reason = "unsupported_campaign"
+        emit_boot_milestone(
+            "WORLD_UNSUPPORTED",
+            "source=" .. source .. ";expected=" .. WR.config.supported_campaign
+                .. ";predicate=false"
+        )
         write_log_once(
             "unsupported-campaign:" .. tostring(stats.campaign),
             "Unsupported campaign " .. tostring(stats.campaign)
                 .. "; this release is intentionally limited to main_rome"
         )
-        return false
+        return false, reason
     end
     if #stats.humans == 0 then
+        local reason = "no_human_faction"
+        emit_boot_milestone(
+            "WORLD_NO_HUMAN",
+            "source=" .. source .. ";factions=" .. tostring(#stats.factions)
+                .. ";active_ai=" .. tostring(#stats.ais)
+        )
         write_log_once("no-human", "No human faction detected; director remains inert")
-        return false
+        return false, reason
     end
 
     local previous_tier = runtime.state.tier
@@ -1337,7 +1383,22 @@ local function reconcile_world(options)
         audit_reason_for_update(stats, previous_tier, opts),
         opts
     )
-    return true
+    emit_boot_milestone(
+        "WORLD_STATE",
+        "source=" .. source
+            .. ";campaign=" .. tostring(stats.campaign)
+            .. ";turn=" .. tostring(stats.turn)
+            .. ";human=" .. tostring(stats.human.key)
+            .. ";active_ai=" .. tostring(#stats.ais)
+            .. ";pressure=" .. tostring(runtime.state.pressure)
+            .. ";tier=" .. tostring(tier_threshold(runtime.state.tier))
+            .. ";base_ok=" .. tostring(base_commands_ok)
+            .. ";catchup_ok=" .. tostring(catchup_commands_ok)
+            .. ";grant_count=" .. tostring(treasury_grant_count)
+            .. ";grant_total=" .. tostring(treasury_granted)
+            .. ";target_armies=" .. tostring(runtime.last_summary.target_armies)
+    )
+    return true, "ready"
 end
 
 
@@ -1448,12 +1509,19 @@ local function initialize_world_once(source)
     if runtime.initialized then
         return true
     end
+    runtime.initialization_attempt_count = runtime.initialization_attempt_count + 1
+    emit_boot_milestone(
+        "WORLD_ATTEMPT",
+        "attempt=" .. tostring(runtime.initialization_attempt_count)
+            .. ";source=" .. tostring(source)
+    )
     write_log("initializing version " .. tostring(VERSION) .. " from " .. tostring(source))
-    local reconciled = reconcile_world({
+    local reconciled, reason = reconcile_world({
         grant_treasury = true,
         diplomacy_pair_budget = WR.config.diplomacy_pair_budget_first_tick,
         log_summary = true,
-        session_start = true
+        session_start = true,
+        source = source
     })
     if reconciled then
         runtime.initialized = true
@@ -1461,12 +1529,25 @@ local function initialize_world_once(source)
         try_show_status()
         return true
     end
-    emit_boot_milestone_once("WORLD_WAIT", source)
+    if reason == "game_unavailable"
+        or reason == "model_unavailable"
+        or reason == "world_unavailable"
+        or reason == "faction_list_unavailable" then
+        -- A campaign can replace or finish publishing its interface after an
+        -- early event. Drop the cached handle so the next event rediscovers
+        -- the live EpisodicScripting object instead of retrying a stale proxy.
+        runtime.game = nil
+        runtime.game_interface_source = nil
+    end
+    emit_boot_milestone(
+        "WORLD_WAIT",
+        "source=" .. tostring(source) .. ";reason=" .. tostring(reason or "unknown")
+    )
     write_log_once(
         "initialization-wait",
-        "Campaign world was not ready; initialization will retry on the first human faction turn"
+        "Campaign world was not ready; initialization will retry on the first faction turn of each campaign turn"
     )
-    return false
+    return false, reason
 end
 
 
@@ -1499,10 +1580,30 @@ local function on_faction_turn_start(context)
 
     -- FirstTickAfterWorldCreated is the normal activation edge. This fallback
     -- covers a state where the event arrived before the campaign published its
-    -- interface; it never activates from an AI turn.
+    -- interface. The first faction turn in each campaign turn may trigger the
+    -- retry; collect_world_stats performs the campaign and human guards.
     if not runtime.initialized then
-        if metric.human then
-            initialize_world_once("FactionTurnStart")
+        local retry_turn = safe_read("event:FactionTurnStart:retry_turn", function()
+            return runtime.game:model():turn_number()
+        end, -1)
+        local should_retry = retry_turn < 0
+            or runtime.last_initialization_faction_turn ~= retry_turn
+        if should_retry then
+            if retry_turn >= 0 then
+                runtime.last_initialization_faction_turn = retry_turn
+            end
+            emit_boot_milestone(
+                "FACTION_TURN_CONTEXT",
+                "turn=" .. tostring(retry_turn)
+                    .. ";faction=" .. tostring(metric.key)
+                    .. ";human=" .. tostring(metric.human)
+                    .. ";active=" .. tostring(metric.active)
+                    .. ";action=world_retry"
+            )
+            -- Retry from the first faction turn in each campaign turn, not
+            -- only from a context already recognized as human. The world scan
+            -- itself enforces a supported campaign and detects the human.
+            initialize_world_once("FactionTurnStart:" .. tostring(metric.key))
         end
         return
     end
@@ -1518,7 +1619,8 @@ local function on_faction_turn_start(context)
         local reconciled = reconcile_world({
             grant_treasury = grant,
             diplomacy_pair_budget = WR.config.diplomacy_pair_budget_human_turn,
-            log_summary = true
+            log_summary = true,
+            source = "human_turn:" .. tostring(metric.key)
         })
         if reconciled then
             try_show_status()

@@ -41,11 +41,11 @@ except ImportError:  # Direct execution from the tools directory.
     from rpfm_ws_client import RpfmWsError, RpfmWsSession
 
 
-BUILD_TOOL_VERSION = "1.4.0"
-RELEASE_VERSION = "0.1.4-beta"
+BUILD_TOOL_VERSION = "1.5.0"
+RELEASE_VERSION = "0.1.5-beta"
 GAME_KEY = "rome_2"
 CAMPAIGN_KEY = "main_rome"
-DIRECTOR_VERSION = 6
+DIRECTOR_VERSION = 7
 TELEMETRY_SCHEMA = 1
 PACK_FILENAME = "@wr2_world_resistance.pack"
 BOOTSTRAP_LOG_PATH = "wr2_world_resistance_bootstrap.log"
@@ -1024,8 +1024,10 @@ def build(arguments: argparse.Namespace) -> dict[str, object]:
             "listener_idempotence": "registry_and_callback_identity",
             "listener_partial_retry": "attached_callback_or_repeated_setup",
             "interface_binding": "lazy_existing_episodic_state",
+            "campaign_detection": "campaign_name_predicate_main_rome",
             "initialization_event": "FirstTickAfterWorldCreated",
-            "initialization_retry": "human_FactionTurnStart",
+            "initialization_retry": "first_FactionTurnStart_each_campaign_turn",
+            "world_diagnostics": "reasoned_bootstrap_state_and_sink_status",
         },
         "payload_provenance": {
             "mode": "fresh_rpfm_build",

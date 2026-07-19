@@ -1,15 +1,15 @@
 # Validation report
 
-Release candidate: `0.1.4-beta`  
+Release candidate: `0.1.5-beta`  
 Validation date: 2026-07-19  
 Target: current public pre-PANTHEON Rome II Grand Campaign (`main_rome`)
 
 ## Final pack
 
 - File: `dist/@wr2_world_resistance.pack`
-- SHA-256: `a2435188985fd93bb9b3998f2201ec9f3ed77f8001d59bf8cf3275750ad60f31`
+- SHA-256: `fb7cde01cbf604071deb3cba344ac58133725b5bf0e29f50f164c25976c898aa`
 - Container: PFH4 Mod, type 3, zero flags, zero dependencies, zero timestamp
-- Size: 104,015 bytes
+- Size: 108,797 bytes
 - Paths, exactly:
 
   - `db/effect_bundles_tables/wr2_world_resistance`
@@ -53,15 +53,18 @@ The unchanged schema snapshot SHA-256 is `cbdb4f74265958ea77da2789e15093c7d12c44
 - Isolated loader/director environment and exact-registry handoff: 59 assertions passed.
 - Partial listener registration, retry, replacement-registry, and insertion-failure recovery: 68 assertions passed.
 - Missing/throwing/partial setup API failure boundaries: 27 assertions passed.
-- Total Lua simulation assertions: 600.
+- Grand Campaign predicate, reasoned world-retry, and diagnostic-sink activation contract: 69 assertions passed.
+- Total Lua simulation assertions: 669.
 
 The engine simulation covers universal ally/neutral/enemy scaling, dormant and human exclusion, read-only loading, UI-before-world ordering, first-tick idempotence, saved popup deduplication, tier escalation notices, denied-file-write safety, native `out.ting` traces, treasury parity, bounded diplomacy, Tier 85 forced AI peace, Tier 100 forced AI trade, declaration-time peace enforcement, and the no-human-diplomacy invariant.
 
-The lifecycle regression reproduces the corrected ordering: `all_scripted.lua` loads with a hostile ambient module path and no campaign interface; the loader temporarily supplies its unique director path; all six listeners register through the explicit setup call; and WR never imports `EpisodicScripting`. A too-early first tick remains uninitialized and mutation-free. After the simulated campaign publishes its existing interface, `LoadingGame` restores all six values and the first human faction turn completes the bounded retry, AI scaling, and treasury activation. Denied file writes remain nonfatal throughout.
+The lifecycle regression reproduces the corrected ordering: `all_scripted.lua` loads with a hostile ambient module path and no campaign interface; the loader temporarily supplies its unique director path; all six listeners register through the explicit setup call; and WR never imports `EpisodicScripting`. A too-early first tick remains uninitialized and mutation-free. After the simulated campaign publishes its existing interface, `LoadingGame` restores all six values and the next faction turn completes the bounded retry, AI scaling, and treasury activation. Denied file writes remain nonfatal throughout.
+
+The 0.1.5 activation regression gives `campaign_name` the exact Rome II predicate contract: it rejects zero arguments, requires the `main_rome` key, and returns a boolean. An unsupported predicate produces no mutations and emits `WORLD_UNSUPPORTED` plus a reasoned `WORLD_WAIT`; the first faction turn in a later campaign turn can recover regardless of whether that event context is AI or human. A successful run must emit `WORLD_STATE`, `WORLD_READY`, and `DIAGNOSTIC_SINK_READY`, write to exactly `data/wr2_world_resistance.log` in append mode, and process every active non-human faction. Separate cases prove that unavailable-world, no-human, and denied-sink outcomes are explicit, while a denied detailed log remains nonfatal.
 
 The new environment-boundary regression evaluates the root loader in an isolated global environment while the required director runs against a different `_G` containing a deliberate decoy `events` table. It proves that the loader passes its exact local `triggers.events` object into `WR.setup`, all six WR callbacks append beside pre-existing native callbacks, the decoy remains untouched, and a cached second loader evaluation reuses callback identities without duplication. Recovery coverage proves that missing or insertion-rejecting slots remain partial and later become ready without duplicating the listeners that already succeeded.
 
-Observability coverage now distinguishes both local logs. `wr2_world_resistance_bootstrap.log` records loader/director milestones before the game interface exists, while `data/wr2_world_resistance.log` remains the structured campaign telemetry sink after successful attachment. Static release checks verify both paths and the bootstrap milestone vocabulary; lifecycle simulation verifies that native bootstrap and session/state traces survive when both file-writing layers fail closed.
+Observability coverage now distinguishes both local logs. `wr2_world_resistance_bootstrap.log` records loader/director milestones before the game interface exists, while `data/wr2_world_resistance.log` remains the structured campaign telemetry sink after successful world reconciliation. `DIAGNOSTIC_SINK_READY` confirms the detailed file opened and wrote; `DIAGNOSTIC_SINK_ERROR` identifies a genuine sink failure. Static release checks verify both paths and the bootstrap milestone vocabulary; lifecycle simulation verifies that native bootstrap and session/state traces survive when both file-writing layers fail closed.
 
 The loader-failure regression forces the explicitly routed director import to throw before any campaign interface exists. It verifies that the vanilla loader and exported event registry survive, `package.path` is restored, the root bootstrap log receives route-level and final sanitized errors, native logging receives the failure, and no partial WR director is published.
 
@@ -75,9 +78,9 @@ Thirty-two tests passed. They cover:
 - six unique numeric custom events, 24 culture-specific message rows, 30 unique localization rows, and exact title/body reference closure;
 - deterministic PFH4 encoding, sorting, atomic output, path safety, duplicate rejection, and malformed-pack rejection;
 - the manual-load-order filename, exact eight-file path/hash/size contract, two-log observability paths, explicit module route, exact-registry setup contract, retry edge, and per-listener bootstrap milestones;
-- byte-for-byte equality between both tested Lua source files and the Lua payloads extracted from the final `.pack`, followed by rerunning all three new registry/setup integration fixtures against those extracted payloads;
+- byte-for-byte equality between both tested Lua source files and the Lua payloads extracted from the final `.pack`, followed by rerunning all four registry/setup/activation integration fixtures against those extracted payloads;
 - the Lua-only payload provenance, byte-identical five-DB-plus-Loc base payloads, unchanged balance, and retained RPFM reopen contract.
 
 ## Limit of this report
 
-This is structural and simulated validation, not a claim of live-game certification. Rome II itself was unavailable here, so the pack has not yet completed a real cold boot, first turn, end turn, save/load, battle return, or high-pressure soak. Follow the live smoke-test sequence in `docs/COMPATIBILITY_AND_TESTING.md` before using the beta with an important save.
+This is structural and simulated validation, not a claim of live-game certification. The user's 0.1.4 trace supplies native evidence for loading, exact registry handoff, all six listeners, event dispatch, and campaign-interface discovery; it also exposed the now-corrected zero-argument campaign-name call. Rome II itself was unavailable here, so 0.1.5 has not yet completed a successful native world reconciliation, effect application, end turn, save/load, battle return, or high-pressure soak. Follow the live smoke-test sequence in `docs/COMPATIBILITY_AND_TESTING.md` before using the beta with an important save.
