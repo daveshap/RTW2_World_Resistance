@@ -10,8 +10,8 @@
 --   * World mutation begins at FirstTickAfterWorldCreated, never LoadingGame.
 --   * Save data consists only of primitive values supported by Rome II.
 
-local VERSION = 8
-local RELEASE_VERSION = "0.1.6-beta"
+local VERSION = 10
+local RELEASE_VERSION = "0.1.8-beta"
 local TELEMETRY_SCHEMA = 1
 local GLOBAL_KEY = "WR2_WORLD_RESISTANCE"
 
@@ -84,13 +84,28 @@ WR.config = {
     max_treasury_grant_per_update = 2000000,
     max_treasury_target = 100000000,
 
+    -- Growth effects speed population accumulation, but they do not supply
+    -- population-surplus/development points retroactively or guarantee that
+    -- the CAI has enough surplus to unlock the next legal building slot. Give
+    -- each AI-owned province a small, pressure-scaled supplement once per
+    -- campaign turn. The command still leaves building choice, technology,
+    -- culture, and chain prerequisites to Rome II.
+    development_points_by_tier = {
+        [0] = 0,
+        [1] = 0,
+        [2] = 1,
+        [3] = 1,
+        [4] = 2,
+        [5] = 3
+    },
+
     -- At tiers 0..3, cooperation is increasingly favoured. At tier 4 the
-    -- anti-AI-war lock begins; tier 5 additionally attempts universal legal
-    -- AI-to-AI trade. Diplomacy is a high-water mark to prevent toggling and
-    -- because force_diplomacy has no documented "restore vanilla" operation.
+    -- anti-AI-war agreement rules begin; tier 5 additionally attempts
+    -- universal legal AI-to-AI trade. Diplomacy is a high-water mark to
+    -- prevent toggling and because force_diplomacy has no documented
+    -- "restore vanilla" operation.
     hard_ai_peace_tier = 4,
     force_trade_tier = 5,
-    lock_best_friends_tier = 4,
 
     -- Strategic stance promotion is directional, so it is always applied in
     -- both directions and only after the pair has passed the AI-only guard.
@@ -659,7 +674,8 @@ local runtime = {
         permanent_floor = 0,
         tier = 0,
         demotion_turns = 0,
-        diplomacy_peak = 0
+        diplomacy_peak = 0,
+        last_development_turn = -1
     },
     base_bundle_by_faction = {},
     catchup_bundle_by_faction = {},
@@ -687,7 +703,8 @@ local SAVE_KEYS = {
     tier = "wr2_wr_tier_v1",
     demotion_turns = "wr2_wr_demotion_turns_v1",
     diplomacy_peak = "wr2_wr_diplomacy_peak_v1",
-    highest_notified_tier = "wr2_wr_highest_notified_tier_v1"
+    highest_notified_tier = "wr2_wr_highest_notified_tier_v1",
+    last_development_turn = "wr2_wr_last_development_turn_v1"
 }
 
 local function safe_read(label, callback, default)
@@ -711,7 +728,7 @@ local function safe_engine_call(label, callback)
     return true
 end
 
-local function count_forces(faction)
+local function count_forces(faction, region_count)
     local forces = safe_read("military_force_list", function()
         return faction:military_force_list()
     end, nil)
@@ -722,11 +739,9 @@ local function count_forces(faction)
     local total = safe_read("military_force_list:num_items", function()
         return forces:num_items()
     end, 0)
-    local commanded_armies = 0
-    local garrison_armies = 0
+    local broad_armies = 0
     local navies = 0
-    local army_units = 0
-    local full_armies = 0
+    local land_force_unit_counts = {}
     local i
     for i = 0, total - 1 do
         local force = safe_read("military_force_list:item_at", function()
@@ -736,37 +751,47 @@ local function count_forces(faction)
             if safe_read("military_force:is_army", function()
                 return force:is_army()
             end, false) then
-                -- Settlement garrisons are exposed as armies too. Only a
-                -- general-led land force consumes an army-cap slot and can be
-                -- compared with the human's deployable field armies.
-                if safe_read("military_force:has_general", function()
-                    return force:has_general()
-                end, false) then
-                    commanded_armies = commanded_armies + 1
-                    local units = safe_read("military_force:unit_list", function()
-                        return force:unit_list()
-                    end, nil)
-                    if units ~= nil then
-                        local unit_count = math.max(safe_read(
-                            "military_force:unit_list:num_items",
-                            function()
-                                return units:num_items()
-                            end,
-                            0
-                        ), 0)
-                        army_units = army_units + unit_count
-                        if unit_count >= WR.config.full_army_unit_count then
-                            full_armies = full_armies + 1
-                        end
-                    end
-                else
-                    garrison_armies = garrison_armies + 1
+                -- Live Rome II testing proved that has_general() does not
+                -- distinguish settlement garrison forces in this list. The
+                -- original Grand Campaign consistently contributes one such
+                -- land force per owned region, so derive a conservative field
+                -- army estimate by subtracting those regional garrisons.
+                broad_armies = broad_armies + 1
+                local units = safe_read("military_force:unit_list", function()
+                    return force:unit_list()
+                end, nil)
+                local unit_count = 0
+                if units ~= nil then
+                    unit_count = math.max(safe_read(
+                        "military_force:unit_list:num_items",
+                        function()
+                            return units:num_items()
+                        end,
+                        0
+                    ), 0)
                 end
+                table.insert(land_force_unit_counts, unit_count)
             elseif safe_read("military_force:is_navy", function()
                 return force:is_navy()
             end, false) then
                 navies = navies + 1
             end
+        end
+    end
+
+    local regions = math.max(tonumber(region_count) or 0, 0)
+    local garrison_armies = math.min(broad_armies, regions)
+    local commanded_armies = math.max(broad_armies - garrison_armies, 0)
+    local army_units = 0
+    local full_armies = 0
+    table.sort(land_force_unit_counts, function(left, right)
+        return left > right
+    end)
+    for i = 1, commanded_armies do
+        local unit_count = land_force_unit_counts[i] or 0
+        army_units = army_units + unit_count
+        if unit_count >= WR.config.full_army_unit_count then
+            full_armies = full_armies + 1
         end
     end
     return total, commanded_armies, garrison_armies, navies, army_units, full_armies
@@ -788,18 +813,59 @@ local function inspect_faction(faction)
         return faction:region_list()
     end, nil)
     local regions = 0
+    local development_regions = {}
+    local seen_provinces = {}
+    local building_count = 0
     if region_list ~= nil then
         regions = safe_read("faction:region_count:" .. key, function()
             return region_list:num_items()
         end, 0)
+        local i
+        for i = 0, regions - 1 do
+            local region = safe_read("faction:region_item:" .. key, function()
+                return region_list:item_at(i)
+            end, nil)
+            if region ~= nil then
+                building_count = building_count + math.max(tonumber(safe_read(
+                    "region:num_buildings:" .. key,
+                    function()
+                        return region:num_buildings()
+                    end,
+                    0
+                )) or 0, 0)
+                local region_key = safe_read("region:name:" .. key, function()
+                    return region:name()
+                end, "")
+                local province_key = safe_read("region:province_name:" .. key, function()
+                    return region:province_name()
+                end, "")
+                if faction_key_is_safe(region_key)
+                    and type(province_key) == "string"
+                    and province_key ~= ""
+                    and not seen_provinces[province_key] then
+                    seen_provinces[province_key] = true
+                    table.insert(development_regions, {
+                        interface = region,
+                        region_key = region_key,
+                        province_key = province_key
+                    })
+                end
+            end
+        end
     end
-    local forces, armies, garrison_armies, navies, army_units, full_armies = count_forces(faction)
+    local forces, armies, garrison_armies, navies, army_units, full_armies = count_forces(
+        faction,
+        regions
+    )
 
     return {
         interface = faction,
         key = key,
         human = human,
         regions = math.max(tonumber(regions) or 0, 0),
+        buildings = math.max(tonumber(building_count) or 0, 0),
+        development_regions = development_regions,
+        development_provinces = #development_regions,
         forces = math.max(tonumber(forces) or 0, 0),
         armies = math.max(tonumber(armies) or 0, 0),
         garrison_armies = math.max(tonumber(garrison_armies) or 0, 0),
@@ -1065,6 +1131,124 @@ local function grant_treasury_to_floor(ai, human, tier, catchup, permanent_floor
 end
 
 
+local function grant_ai_development_points(stats)
+    local tier = clamp(tonumber(runtime.state.tier) or 0, 0, #WR.config.tiers - 1)
+    local points_per_province = math.max(
+        math.floor(tonumber(WR.config.development_points_by_tier[tier]) or 0),
+        0
+    )
+    local result = {
+        status = "not_due",
+        points_per_province = points_per_province,
+        provinces = 0,
+        commands_ok = 0,
+        commands_failed = 0,
+        owner_skips = 0,
+        points_granted = 0,
+        by_faction = {}
+    }
+
+    local i
+    for i = 1, #stats.ais do
+        local ai = stats.ais[i]
+        local eligible = math.max(tonumber(ai.development_provinces) or 0, 0)
+        result.provinces = result.provinces + eligible
+        result.by_faction[ai.key] = {
+            provinces = eligible,
+            commands_ok = 0,
+            commands_failed = 0,
+            owner_skips = 0,
+            points_granted = 0
+        }
+    end
+
+    local turn = math.floor(tonumber(stats.turn) or -1)
+    if turn < 0 then
+        result.status = "turn_unavailable"
+        return result
+    end
+    if math.floor(tonumber(runtime.state.last_development_turn) or -1) == turn then
+        result.status = "already_granted"
+        return result
+    end
+
+    -- Mark the turn before crossing the native boundary. If a binding is
+    -- unavailable or one target is invalid, a later callback/load must not
+    -- retry the entire batch and accidentally duplicate earlier grants.
+    runtime.state.last_development_turn = turn
+    if points_per_province <= 0 then
+        result.status = "tier_zero"
+        return result
+    end
+
+    result.status = "accepted"
+    for i = 1, #stats.ais do
+        local ai = stats.ais[i]
+        local faction_result = result.by_faction[ai.key]
+        local j
+        for j = 1, #ai.development_regions do
+            local target = ai.development_regions[j]
+            local owner = safe_read(
+                "development:owner:" .. target.region_key,
+                function()
+                    return target.interface:owning_faction()
+                end,
+                nil
+            )
+            local owner_key = ""
+            local owner_human = true
+            if owner ~= nil then
+                owner_key = safe_read(
+                    "development:owner_name:" .. target.region_key,
+                    function()
+                        return owner:name()
+                    end,
+                    ""
+                )
+                owner_human = safe_read(
+                    "development:owner_human:" .. target.region_key,
+                    function()
+                        return owner:is_human()
+                    end,
+                    true
+                )
+            end
+            if owner_key == ai.key and owner_human ~= true then
+                local accepted = safe_engine_call("development_points", function()
+                    runtime.game:add_development_points_to_region(
+                        target.region_key,
+                        points_per_province
+                    )
+                end)
+                if not accepted then
+                    result.commands_failed = result.commands_failed + 1
+                    faction_result.commands_failed = faction_result.commands_failed + 1
+                else
+                    result.commands_ok = result.commands_ok + 1
+                    result.points_granted = result.points_granted + points_per_province
+                    faction_result.commands_ok = faction_result.commands_ok + 1
+                    faction_result.points_granted = faction_result.points_granted
+                        + points_per_province
+                end
+            else
+                result.owner_skips = result.owner_skips + 1
+                faction_result.owner_skips = faction_result.owner_skips + 1
+            end
+        end
+    end
+    if result.commands_failed > 0 then
+        if result.commands_ok > 0 then
+            result.status = "partial_error"
+        else
+            result.status = "disabled_on_error"
+        end
+    elseif result.owner_skips > 0 then
+        result.status = "owner_changed"
+    end
+    return result
+end
+
+
 local function reconcile_faction(ai, stats, grant_treasury)
     if ai.human or not ai.active then
         return 0, 0, nil
@@ -1102,6 +1286,8 @@ local function reconcile_faction(ai, stats, grant_treasury)
     return changes, grant, {
         faction = ai.key,
         regions = ai.regions,
+        buildings = ai.buildings,
+        development_provinces = ai.development_provinces,
         imperium = ai.imperium,
         military_forces = ai.forces,
         armies = ai.armies,
@@ -1120,7 +1306,12 @@ local function reconcile_faction(ai, stats, grant_treasury)
         catchup_bundle = desired_catchup or "none",
         base_command_ok = runtime.base_bundle_by_faction[ai.key] == desired_base,
         catchup_command_ok = runtime.catchup_bundle_by_faction[ai.key]
-            == (desired_catchup or false)
+            == (desired_catchup or false),
+        development_points_per_province = 0,
+        development_commands_ok = 0,
+        development_commands_failed = 0,
+        development_owner_skips = 0,
+        development_points_granted = 0
     }
 end
 
@@ -1177,41 +1368,6 @@ local function promote_strategic_stance_both(a, b, mode)
         )
     end)
     return first and second
-end
-
-
-local function lock_best_friends_stance_both(a, b)
-    if not assert_ai_pair(a, b) then
-        return false
-    end
-    local stance = "CAI_STRATEGIC_STANCE_BEST_FRIENDS"
-    local first_block = safe_engine_call("block_stance:" .. a.key .. ":" .. b.key, function()
-        runtime.game:cai_strategic_stance_manager_block_all_stances_but_that_specified_towards_target_faction(
-            a.key,
-            b.key,
-            stance
-        )
-    end)
-    local first_update = safe_engine_call("force_stance_update:" .. a.key .. ":" .. b.key, function()
-        runtime.game:cai_strategic_stance_manager_force_stance_update_between_factions(
-            a.key,
-            b.key
-        )
-    end)
-    local second_block = safe_engine_call("block_stance:" .. b.key .. ":" .. a.key, function()
-        runtime.game:cai_strategic_stance_manager_block_all_stances_but_that_specified_towards_target_faction(
-            b.key,
-            a.key,
-            stance
-        )
-    end)
-    local second_update = safe_engine_call("force_stance_update:" .. b.key .. ":" .. a.key, function()
-        runtime.game:cai_strategic_stance_manager_force_stance_update_between_factions(
-            b.key,
-            a.key
-        )
-    end)
-    return first_block and first_update and second_block and second_update
 end
 
 
@@ -1275,12 +1431,6 @@ local function apply_diplomacy_mode(pair, mode)
         calls = calls + 4
         if force_ai_peace(a, b) then
             wars_ended = wars_ended + 1
-        end
-        -- Refresh the locked cooperative stance after any peace command so
-        -- the CAI immediately evaluates the pair in its post-war state.
-        if mode >= WR.config.lock_best_friends_tier then
-            mode_applied = lock_best_friends_stance_both(a, b) and mode_applied
-            calls = calls + 4
         end
     end
     if mode >= WR.config.force_trade_tier then
@@ -1446,11 +1596,6 @@ end
 local function collect_attitude_audit(stats)
     local ai_to_ai = new_numeric_aggregate()
     local ai_to_human = new_numeric_aggregate()
-    local stance_block_checks = 0
-    local stance_blocked_directions = 0
-    local campaign_ai = safe_read("model:campaign_ai", function()
-        return stats.model:campaign_ai()
-    end, nil)
     local i, j
     for i = 1, #stats.ais do
         local source = stats.ais[i]
@@ -1462,24 +1607,6 @@ local function collect_attitude_audit(stats)
                 local target = stats.ais[j]
                 if target.key ~= source.key then
                     add_numeric_aggregate(ai_to_ai, attitudes[target.key])
-                    if campaign_ai ~= nil then
-                        local blocked = safe_read(
-                            "campaign_ai:stance_blocked:" .. source.key .. ":" .. target.key,
-                            function()
-                                return campaign_ai:strategic_stance_between_factions_is_being_blocked(
-                                    source.key,
-                                    target.key
-                                )
-                            end,
-                            nil
-                        )
-                        if blocked ~= nil then
-                            stance_block_checks = stance_block_checks + 1
-                            if blocked == true then
-                                stance_blocked_directions = stance_blocked_directions + 1
-                            end
-                        end
-                    end
                 end
             end
             for j = 1, #stats.humans do
@@ -1492,9 +1619,7 @@ local function collect_attitude_audit(stats)
     end
     return {
         ai_to_ai = finish_numeric_aggregate(ai_to_ai),
-        ai_to_human = finish_numeric_aggregate(ai_to_human),
-        stance_block_checks = stance_block_checks,
-        stance_blocked_directions = stance_blocked_directions
+        ai_to_human = finish_numeric_aggregate(ai_to_human)
     }
 end
 
@@ -1554,10 +1679,19 @@ local function emit_world_telemetry(stats, summary, faction_audits, audit_reason
             { "bundle_changes", summary.bundle_changes },
             { "grant_count", summary.treasury_grant_count },
             { "grant_total", summary.treasury_granted },
+            { "development_status", summary.development_status },
+            { "development_points_per_province", summary.development_points_per_province },
+            { "development_provinces", summary.development_provinces },
+            { "development_commands_ok", summary.development_commands_ok },
+            { "development_commands_failed", summary.development_commands_failed },
+            { "development_owner_skips", summary.development_owner_skips },
+            { "development_points_granted", summary.development_points_granted },
+            { "last_development_turn", summary.last_development_turn },
             { "pairs_total", summary.diplomatic_pairs_total },
             { "pairs_updated", summary.diplomatic_pairs },
             { "pairs_pending", summary.diplomatic_pairs_pending },
-            { "best_friend_pair_commands_ok", summary.best_friend_pair_commands_ok },
+            { "army_measure", "region_adjusted_estimate" },
+            { "best_friend_promotions_ok", summary.best_friend_promotions_ok },
             { "diplomatic_calls", summary.diplomatic_calls },
             { "peace_commands", summary.wars_ended }
         })
@@ -1589,9 +1723,8 @@ local function emit_world_telemetry(stats, summary, faction_audits, audit_reason
             { "ai_human_min", attitudes.ai_to_human.minimum },
             { "ai_human_avg", attitudes.ai_to_human.average },
             { "ai_human_max", attitudes.ai_to_human.maximum },
-            { "stance_block_checks", attitudes.stance_block_checks },
-            { "stance_blocked_directions", attitudes.stance_blocked_directions },
-            { "best_friend_pair_commands_ok", summary.best_friend_pair_commands_ok },
+            { "cooperation_mode", "promotion_only" },
+            { "best_friend_promotions_ok", summary.best_friend_promotions_ok },
             { "pairs_total", summary.diplomatic_pairs_total }
         })
         table.insert(file_lines, attitude_line)
@@ -1604,6 +1737,13 @@ local function emit_world_telemetry(stats, summary, faction_audits, audit_reason
                 { "turn", stats.turn },
                 { "faction", audit.faction },
                 { "regions", audit.regions },
+                { "buildings", audit.buildings },
+                { "development_provinces", audit.development_provinces },
+                { "development_points_per_province", audit.development_points_per_province },
+                { "development_commands_ok", audit.development_commands_ok },
+                { "development_commands_failed", audit.development_commands_failed },
+                { "development_owner_skips", audit.development_owner_skips },
+                { "development_points_granted", audit.development_points_granted },
                 { "imperium", audit.imperium },
                 { "military_forces", audit.military_forces },
                 { "commanded_armies", audit.armies },
@@ -1734,6 +1874,19 @@ local function reconcile_world(options)
     end
     cleanup_inactive_cached_factions(active_keys)
 
+    local development = grant_ai_development_points(stats)
+    for i = 1, #faction_audits do
+        local audit = faction_audits[i]
+        local faction_development = development.by_faction[audit.faction]
+        audit.development_points_per_province = development.points_per_province
+        if faction_development ~= nil then
+            audit.development_commands_ok = faction_development.commands_ok
+            audit.development_commands_failed = faction_development.commands_failed
+            audit.development_owner_skips = faction_development.owner_skips
+            audit.development_points_granted = faction_development.points_granted
+        end
+    end
+
     local diplomatic_pairs, diplomatic_calls, wars_ended,
         diplomatic_pairs_total, diplomatic_pairs_pending = reconcile_diplomacy(
         stats,
@@ -1759,11 +1912,18 @@ local function reconcile_world(options)
         ai_army_goal = ai_army_goal,
         ai_full_armies = ai_full_armies,
         ai_factions_at_army_goal = ai_factions_at_army_goal,
+        development_status = development.status,
+        development_points_per_province = development.points_per_province,
+        development_provinces = development.provinces,
+        development_commands_ok = development.commands_ok,
+        development_commands_failed = development.commands_failed,
+        development_owner_skips = development.owner_skips,
+        development_points_granted = development.points_granted,
+        last_development_turn = runtime.state.last_development_turn,
         diplomatic_pairs = diplomatic_pairs,
         diplomatic_pairs_total = diplomatic_pairs_total,
         diplomatic_pairs_pending = diplomatic_pairs_pending,
-        best_friend_pair_commands_ok = runtime.state.diplomacy_peak
-                >= WR.config.lock_best_friends_tier
+        best_friend_promotions_ok = runtime.state.diplomacy_peak >= 3
             and math.max(diplomatic_pairs_total - diplomatic_pairs_pending, 0)
             or 0,
         diplomatic_calls = diplomatic_calls,
@@ -1791,6 +1951,11 @@ local function reconcile_world(options)
             .. ";catchup_ok=" .. tostring(catchup_commands_ok)
             .. ";grant_count=" .. tostring(treasury_grant_count)
             .. ";grant_total=" .. tostring(treasury_granted)
+            .. ";development_status=" .. tostring(development.status)
+            .. ";development_commands_ok=" .. tostring(development.commands_ok)
+            .. ";development_commands_failed=" .. tostring(development.commands_failed)
+            .. ";development_owner_skips=" .. tostring(development.owner_skips)
+            .. ";development_points_granted=" .. tostring(development.points_granted)
             .. ";target_armies=" .. tostring(runtime.last_summary.target_armies)
     )
     return true, "ready"
@@ -1860,6 +2025,17 @@ local function on_loading_game(context)
     runtime.state.diplomacy_peak = safe_read("load:diplomacy_peak", function()
         return runtime.game:load_named_value(SAVE_KEYS.diplomacy_peak, 0, context)
     end, 0)
+    runtime.state.last_development_turn = math.floor(tonumber(safe_read(
+        "load:last_development_turn",
+        function()
+            return runtime.game:load_named_value(
+                SAVE_KEYS.last_development_turn,
+                -1,
+                context
+            )
+        end,
+        -1
+    )) or -1)
     local loaded_notified_tier = safe_read("load:highest_notified_tier", function()
         return runtime.game:load_named_value(SAVE_KEYS.highest_notified_tier, -1, context)
     end, -1)
@@ -1889,6 +2065,13 @@ local function on_saving_game(context)
     end)
     safe_engine_call("save:diplomacy_peak", function()
         runtime.game:save_named_value(SAVE_KEYS.diplomacy_peak, runtime.state.diplomacy_peak, context)
+    end)
+    safe_engine_call("save:last_development_turn", function()
+        runtime.game:save_named_value(
+            SAVE_KEYS.last_development_turn,
+            runtime.state.last_development_turn,
+            context
+        )
     end)
     safe_engine_call("save:highest_notified_tier", function()
         runtime.game:save_named_value(
@@ -2041,8 +2224,7 @@ local function on_faction_turn_start(context)
                 runtime.last_summary.diplomatic_pairs_pending = pairs_pending
                 runtime.last_summary.diplomatic_calls = diplomatic_calls
                 runtime.last_summary.wars_ended = wars_ended
-                runtime.last_summary.best_friend_pair_commands_ok = runtime.state.diplomacy_peak
-                        >= WR.config.lock_best_friends_tier
+                runtime.last_summary.best_friend_promotions_ok = runtime.state.diplomacy_peak >= 3
                     and math.max(pairs_total - pairs_pending, 0)
                     or 0
             end

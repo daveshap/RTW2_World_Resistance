@@ -1,21 +1,82 @@
 # Changelog
 
+## 0.1.8-beta — 2026-07-20
+
+This is a focused settlement-development hotfix built on the first successful 0.1.7 campaign soak. Release 0.1.7 no longer crashed when the Diplomacy panel opened and produced stronger armies and heavy agent pressure, but many settlements captured during a very late save still contained low-level buildings.
+
+### Added
+
+- Added AI-only province development support through `game:add_development_points_to_region`. Each active AI receives 0 / 0 / 1 / 1 / 2 / 3 development points per unique owned province per campaign turn at pressure Tiers 0 / 20 / 40 / 65 / 85 / 100.
+- Uses one representative owned region per unique province so a multi-settlement province is not multiplied by its settlement count.
+- Saves one global last-development-turn value. Repeated first-tick reconciliation, battle return, or save/load during the same campaign turn cannot duplicate the grant.
+- Added aggregate `STATE` fields for points per province, eligible provinces, accepted/failed commands, final owner-guard skips, total points, status, and last processed turn. Per-AI audits report the same faction-level development totals.
+- Bumped the release/director identifiers to `0.1.8-beta` / `10`.
+
+### Scope and safety
+
+- This is a Lua-only change. The 0.1.7 DB and localization payloads, activation path, army-cap rows, bundle matrix, treasury logic, and promotion-only diplomacy commands are unchanged.
+- Development points supply population/development surplus. They do not force CAI to build, select a chain, bypass faction/culture prerequisites, instantly upgrade an existing building, or touch a human province.
+- `development_commands_ok` means the protected native call returned without a Lua exception. `development_commands_failed` counts contained call errors, and `development_owner_skips` counts representatives rejected by the final ownership guard. A failed target does not abort later safe targets. These fields are not independent engine readback and do not certify a later construction choice.
+- Kept agent caps unchanged. The maximum-pressure test produced heavy agent activity, including eight general deaths in one turn, but those caps share the selected fame row with a max-Imperium human and no proven faction-only safe cap lever was found. A later release may expose agent pressure as an explicit balance option.
+
+### Live evidence that motivated the change
+
+- The supplied 0.1.7 logs cover only turns 207–211. Rome expanded from 138 to 148 of 173 regions and active AI factions fell from 14 to 12.
+- Every surviving AI received Tier 100 plus Catch-up 3, with treasury targets around 4.8–5.9 million. Funding was therefore not the observed buildout bottleneck.
+- The save supplied only four new development cycles before another ten settlements changed hands. It proves 0.1.7 activation, Diplomacy-panel stability, mobilization, and pressure; it is not a fair test of full-campaign AI settlement development.
+
+### Required live retest
+
+- Verify the 0.1.7 Diplomacy-panel, end-turn, save/load, battle-return, and human-isolation boundaries again.
+- At Tier 40+, confirm each unique AI province is attempted once per campaign turn, no human province is targeted, and reloading in the same turn leaves `last_development_turn` unchanged without a second grant.
+- Use a new original Grand Campaign for the meaningful build-tree test. A late save cannot retroactively receive the development points, research, construction cycles, or CAI choices it missed.
+
+## 0.1.7-beta — 2026-07-20
+
+This is a mandatory native Diplomacy-panel crash hotfix for 0.1.6. The campaign world could load and complete reconciliation under 0.1.6, but opening the Diplomacy panel caused a repeatable hard crash. Comparison with the live-stable 0.1.5 command profile isolated the regression to the new whole-map hard-block/forced-refresh stance mutations.
+
+### Fixed
+
+- Removed every call to `cai_strategic_stance_manager_block_all_stances_but_that_specified_towards_target_faction` and `cai_strategic_stance_manager_force_stance_update_between_factions`. At an 80-pair maximum-pressure batch, 0.1.6 issued 320 of these newly added native calls—one block and refresh in each direction per pair.
+- Removed `strategic_stance_between_factions_is_being_blocked` audit readback. Release 0.1.6 called that binding with the wrong argument shape, so its `stance_block_checks` and `stance_blocked_directions` values were not valid evidence.
+- Retained the live-proven diplomacy operations from 0.1.5: bidirectional tier-appropriate stance promotion, reaching `BEST_FRIENDS` at high pressure; AI-only treaty permissions and protections; blocked ordinary war/join-war offers; repeated peace enforcement; and Tier 100 legal trade attempts.
+- Did not automatically clear any blocker state that a 0.1.6 runtime may have created. Clearing is another unproven native mutation and could erase vanilla or another mod's constraints. Prefer a save made before 0.1.6's diplomacy reconciliation when retesting.
+- Corrected field-army measurement after live Rome II output proved that `has_general()` does not distinguish settlement garrison forces in this interface. For supported `main_rome` campaigns, `commanded_armies` is now an estimate: broad land-army forces minus one presumed settlement-garrison force per owned region, clamped at zero. Mobilization, catch-up, army-unit, and full-stack figures derived from it are explicitly estimates rather than engine readback.
+
+### Diagnostics and documentation
+
+- Replaced hard-lock acceptance and blocker-readback claims with promotion-command acceptance. `BEST_FRIENDS` promotion is strategic guidance, not a visible numeric relations write and not proof of a formal alliance; historical attitudes may remain hostile in the UI.
+- Kept both local logs bounded at 1,000 lines with the newest 800 retained during rotation.
+- Integrated the banner-first README, expanded endgame theory, and version-by-version native/static/artifact evidence history into the release package.
+- Bumped the release/director identifiers to `0.1.7-beta` / `9`.
+
+### Required live retest
+
+- Use only the 0.1.7 pack and, when possible, a save that predates 0.1.6 diplomacy mutation. Open and close the Diplomacy panel repeatedly before ending a turn, then test AI turns, save/load, battle return, promotion/peace behavior, army estimates, and rolling-log bounds.
+
 ## 0.1.6-beta — 2026-07-19
 
 This is an observability and anti-hegemonic-coordination update built on the first successful native 0.1.5 campaign reconciliation. The live 0.1.5 traces reached `WORLD_STATE`, `WORLD_READY`, `DIAGNOSTIC_SINK_READY`, `SESSION_START`, `STATE`, and complete AI/pair audits; the activation popup appeared once and remained suppressed after a full exit, reload, and subsequent turn. The same run showed every active AI receiving the maximum pressure and catch-up packages, all surviving AI wars being reconciled, and all 91 AI pairs eventually processed.
 
 ### Changed
 
-- Corrected army telemetry and parity calculations to count only general-led land forces as deployable field armies. Rome II exposes settlement garrisons through the same broad army list; those garrisons previously inflated the human and AI army signals.
-- Added separate `commanded_armies`, `garrison_armies`, `army_units`, and `full_armies` telemetry. A full army is a general-led field army with at least 20 units.
+- Attempted to correct army telemetry and parity calculations by treating `has_general()` land forces as deployable field armies. Subsequent live output proved that predicate does not distinguish settlement garrison forces in this Rome II interface.
+- Added separate `commanded_armies`, `garrison_armies`, `army_units`, and `full_armies` telemetry, but the 0.1.6 classification was invalid and must not be treated as field-army readback.
 - Added a per-faction mobilization goal of `min(4 × regions, human parity target, 16)`. A one-region faction therefore aims for at most four field armies, while a four-region faction can aim for the full 16. This is a comparison and reserve target, not a force-spawn command or a dynamic legal-cap rewrite.
 - Retained the existing Grand Campaign fame override: active AI can legally reach the final 16-army row, while the human keeps the vanilla 3-to-16 progression. The CAI still decides when and where to recruit.
-- At Tier 85 and above, every AI-to-AI direction is now hard-blocked to `CAI_STRATEGIC_STANCE_BEST_FRIENDS` and immediately force-refreshed. Existing protected trade/peace/non-aggression/alliance permissions, break prohibitions, war/join-war blocks, repeated peace enforcement, and Tier 100 legal trade attempts remain in place.
+- Attempted to hard-block every Tier 85+ AI-to-AI direction to `CAI_STRATEGIC_STANCE_BEST_FRIENDS` and immediately force-refresh it. This historical 0.1.6 change is unsafe and is removed completely in 0.1.7. Existing protected trade/peace/non-aggression/alliance permissions, break prohibitions, war/join-war blocks, repeated peace enforcement, and Tier 100 legal trade attempts remain in place.
 - Did **not** add a claimed `+300` visible relations modifier. The audited Rome II interface exposes numeric faction attitudes for reading, but no safe pair-specific numeric setter. A global DB diplomacy modifier would also affect relationships with the human and therefore violates the AI-only contract.
-- Added `DIPLOMACY_AUDIT` records with directional AI-to-AI and AI-to-human attitude count/minimum/average/maximum values, stance-block readback counts, accepted best-friend pair-command counts, and total pair counts.
+- Added `DIPLOMACY_AUDIT` records with directional AI-to-AI and AI-to-human attitude aggregates. Its 0.1.6 stance-block counters used an invalid binding shape and are removed in 0.1.7; they must not be interpreted as native readback.
 - Added AI mobilization totals to `STATE` and per-faction goal/shortfall fields to `AI` audit records.
 - Bounded both local log files to 1,000 lines. Rotation keeps the newest 800 lines (or the largest smaller tail that leaves room for the incoming detailed batch). If line tracking or rewrite fails, that file write is skipped; native output and all campaign mechanics continue.
 - Bumped the release/director identifiers to `0.1.6-beta` / `8`.
+
+### Native regression discovered after release
+
+- The campaign map loaded and the reconciliation/audit logs completed, but opening the Diplomacy panel caused a repeatable native hard crash.
+- The only new per-pair native mutations relative to the successful 0.1.5 run were the bidirectional hard blocks and forced stance refreshes: four additional calls per pair. Protected Lua execution cannot catch a crash that occurs later when native UI code reads inconsistent state.
+- The new blocker-readback audit was also invalid because the binding requires the stance argument that 0.1.6 omitted.
+- Release 0.1.7 removes all three method families instead of attempting another unproven native repair.
 
 ### Deliberately unchanged
 

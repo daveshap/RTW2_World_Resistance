@@ -100,6 +100,17 @@ assert_equal(WR.ai_army_goal({ regions = 3 }, mobilized_human, 65), 12, "three r
 assert_equal(WR.ai_army_goal({ regions = 9 }, mobilized_human, 65), 16, "regional goal is capped at sixteen")
 assert_equal(WR.ai_army_goal({ regions = 0 }, mobilized_human, 65), 0, "landless faction has no recruitment goal")
 
+-- Population-surplus support remains pressure-scaled and bounded. It unlocks
+-- legal CAI construction choices without scripting a building or chain.
+local expected_development = { 0, 0, 1, 1, 2, 3 }
+for tier = 0, 5 do
+    assert_equal(
+        WR.config.development_points_by_tier[tier],
+        expected_development[tier + 1],
+        "development points at tier " .. tostring(tier)
+    )
+end
+
 -- Weak factions receive the strongest catch-up regardless of relationship.
 local human = { regions = 55, armies = 16, treasury = 100000 }
 assert_equal(WR.catchup_level({ regions = 1, armies = 1, treasury = 1000 }, human, 65), 3, "one-region faction catch-up")
@@ -132,7 +143,7 @@ local telemetry = WR.telemetry_line("STATE", {
     { "number", 42 }
 })
 assert_true(
-    string.find(telemetry, "WR2|schema=1|event=STATE|release=0.1.6-beta|director=8", 1, true) == 1,
+    string.find(telemetry, "WR2|schema=1|event=STATE|release=0.1.8-beta|director=10", 1, true) == 1,
     "telemetry prefix is versioned and deterministic"
 )
 assert_true(

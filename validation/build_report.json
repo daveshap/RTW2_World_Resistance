@@ -1,5 +1,5 @@
 {
-  "build_tool_version": "1.6.0-hotfix",
+  "build_tool_version": "1.8.0-hotfix",
   "final_pack": {
     "dependency_count": 0,
     "file_count": 8,
@@ -7,7 +7,7 @@
     "file_type": 3,
     "flags": 0,
     "format": "PFH4",
-    "pack_size": 128536,
+    "pack_size": 135934,
     "paths": [
       "db/effect_bundles_tables/wr2_world_resistance",
       "db/effect_bundles_to_effects_junctions_tables/wr2_world_resistance",
@@ -18,7 +18,7 @@
       "script/campaign/wr2/wr2_world_resistance.lua",
       "text/db/wr2_world_resistance.loc"
     ],
-    "sha256": "89c126b154563b11ff50a09fc2abcbcb88b260b9741423b262c0ea054d496fc2",
+    "sha256": "4f01060d9ace7d948f7948f4de76220c6c51ef1c5a40de218bd82197114ef1d6",
     "timestamp": 0,
     "valid": true
   },
@@ -26,8 +26,8 @@
     "fame_tsv_sha256": "6247489e644f60826e91bf38303b4dd7570bda247addb1e8f2351b0103fbfe78",
     "localisation_tsv_sha256": "91012e2e80d8f5aee238175ed4ae0be354077d4f43d2b530cb463e17a076dc52",
     "lua_sha256": {
-      "lua_scripts/all_scripted.lua": "fb3e6746fd7d88b415302d05e02a4bba36df033a9011042a23c38a2bc93b0a4f",
-      "script/campaign/wr2/wr2_world_resistance.lua": "4b36c8b9915837a91f9eb79bbda7ec3cd677d895ed2084a0d953bde5f990533f"
+      "lua_scripts/all_scripted.lua": "788cf0ddcc4f3586cae359c593970e1e4ecf7d73a87a6d0994a9887ebb6d4327",
+      "script/campaign/wr2/wr2_world_resistance.lua": "1895ce3636c012d250159ff5b76734c22ad3402e341a32afd87374dc1ac96dbd"
     },
     "matrix_csv_sha256": "337a4e30ce7258b5efb8e110ba36e66bee30e8d6604b05b0027b5a79e17ba7aa",
     "matrix_json_sha256": "12526c2102d85cbda2a9f5e73dbb6a6b96f067f15867c07dd76fbf07e838dff7",
@@ -59,7 +59,7 @@
       "text/db/wr2_world_resistance.loc": "a36f0f28f83cfdaae41cf8ac49e19efcd32cf2a180457fe5e0f9547905916a03"
     }
   },
-  "release_version": "0.1.6-beta",
+  "release_version": "0.1.8-beta",
   "rpfm_encode": {
     "container": {
       "bitmask": "",
@@ -167,16 +167,27 @@
   },
   "runtime_contract": {
     "ai_army_goal": "min_four_per_region_human_parity_sixteen",
-    "ai_cooperation": "pair_scoped_best_friends_lock_at_tier_85",
-    "army_measurement": "general_led_land_forces_only",
+    "ai_cooperation": "pair_scoped_best_friends_promotion_no_native_locks",
+    "army_measurement": "region_adjusted_land_force_estimate",
     "bootstrap_log_path": "wr2_world_resistance_bootstrap.log",
     "campaign_detection": "campaign_name_predicate_main_rome",
+    "development_human_isolation": "current_owner_rechecked_before_each_command",
+    "development_save_deduplication": "global_campaign_turn_high_water_mark",
+    "development_scale_by_tier": [
+      0,
+      0,
+      1,
+      1,
+      2,
+      3
+    ],
+    "development_support": "per_ai_province_once_per_turn_tier_scaled",
     "diagnostic_log_keep_lines": 800,
     "diagnostic_log_max_lines": 1000,
     "diagnostic_log_path": "data/wr2_world_resistance.log",
     "director_module_path": "script/campaign/wr2/wr2_world_resistance.lua",
     "director_require_name": "wr2_world_resistance",
-    "director_version": 8,
+    "director_version": 10,
     "initialization_event": "FirstTickAfterWorldCreated",
     "initialization_retry": "first_FactionTurnStart_each_campaign_turn",
     "interface_binding": "lazy_existing_episodic_state",
@@ -184,6 +195,7 @@
     "listener_partial_retry": "attached_callback_or_repeated_setup",
     "listener_registration": "explicit_loader_setup_with_exported_registry",
     "pack_filename": "@wr2_world_resistance.pack",
+    "settlement_measurement": "region_num_buildings_read_only",
     "telemetry_schema": 1,
     "visible_attitude_mutation": "read_only_telemetry_no_unsafe_global_bonus",
     "world_diagnostics": "reasoned_bootstrap_state_and_sink_status"

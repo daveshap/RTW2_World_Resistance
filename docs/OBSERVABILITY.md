@@ -1,6 +1,6 @@
 # Observability and local diagnostics
 
-World Resistance 0.1.6 exposes module resolution, explicit event-registry handoff, listener registration, lazy engine discovery, event delivery, campaign probing, command processing, field-army mobilization, directional diplomatic attitudes, and diagnostic-file health as separate signals. This is deliberately not remote telemetry: the pack contains no network code and uploads nothing.
+World Resistance 0.1.8 exposes module resolution, explicit event-registry handoff, listener registration, lazy engine discovery, event delivery, campaign probing, command processing, estimated field-army mobilization, province-development work, directional diplomatic attitudes, and diagnostic-file health as separate signals. This is deliberately not remote telemetry: the pack contains no network code and uploads nothing.
 
 ## Bootstrap file
 
@@ -10,10 +10,10 @@ The root `all_scripted.lua` loader owns a small rolling bootstrap stream. In a n
 ...\Total War Rome II\wr2_world_resistance_bootstrap.log
 ```
 
-The root logger starts before the director import, so it can report a module-route or setup failure even when the detailed campaign logger never starts. A 0.1.6 line has this shape:
+The root logger starts before the director import, so it can report a module-route or setup failure even when the detailed campaign logger never starts. A 0.1.8 line has this shape:
 
 ```text
-WR2|schema=1|event=BOOT|release=0.1.6-beta|load=table: 01234567|stage=LOADER_START
+WR2|schema=1|event=BOOT|release=0.1.8-beta|load=table: 01234567|stage=LOADER_START
 ```
 
 `load` is an opaque token created for one evaluation of `all_scripted.lua`. Use it only to group lines from the same loader evaluation; it is not a campaign ID and is not persisted. This removes the ambiguity in older traces, where adjacent blocks could have come from different Lua states or game launches.
@@ -62,7 +62,7 @@ The loader restores Rome II's original `package.path` immediately after the prot
 | `WORLD_UNSUPPORTED` | The world was readable, but `model:campaign_name("main_rome")` returned false |
 | `WORLD_NO_HUMAN` | The supported world was readable, but its faction scan found no human; detail includes faction and active-AI counts |
 | `WORLD_WAIT` | This attempt did not initialize; detail repeats the source and exact failure reason |
-| `WORLD_STATE` | Reconciliation succeeded; detail summarizes campaign, turn, human, active AI, pressure/tier, accepted bundle commands, treasury grants, and target armies |
+| `WORLD_STATE` | Reconciliation succeeded; detail summarizes campaign, turn, human, active AI, pressure/tier, accepted bundle commands, treasury grants, province-development work, and target armies |
 | `DIAGNOSTIC_SINK_READY` | The detailed `data/wr2_world_resistance.log` sink opened and wrote successfully |
 | `DIAGNOSTIC_SINK_ERROR` | The detailed sink failed to open/write/flush/close; mechanics remain enabled and native/bootstrap diagnostics continue |
 | `WORLD_READY` | A supported `main_rome` world completed its first reconciliation |
@@ -88,7 +88,7 @@ data/wr2_world_resistance.log
 It is deliberately opened only after `FirstTickAfterWorldCreated`, or a later per-campaign-turn faction-turn fallback, has collected and processed a supported `main_rome` world. Each line retains the stable pipe-delimited schema:
 
 ```text
-WR2|schema=1|event=STATE|release=0.1.6-beta|director=8|key=value|...
+WR2|schema=1|event=STATE|release=0.1.8-beta|director=10|key=value|...
 ```
 
 Carriage returns, newlines, tabs, and pipe characters are removed from values. String fields are length-limited. The file is opened, appended, flushed, and closed for each batch so it can be inspected while Rome II is running.
@@ -98,20 +98,22 @@ The detailed file also has a hard ceiling of 1,000 lines. Before a batch would e
 | Event | Frequency | Purpose |
 |---|---|---|
 | `SESSION_START` | First successful reconciliation in a Lua session | Release, campaign, human faction, turn, path, and local-only declaration |
-| `STATE` | At most once per human turn, plus the initial session state | Inputs, corrected human field-army metrics, pressure/tier, aggregate AI mobilization/goals, catch-up distribution, accepted bundle commands, treasury grants, pair backlog, accepted best-friend pair commands, and peace work |
+| `STATE` | At most once per human turn, plus the initial session state | Inputs, estimated human field-army metrics with `army_measure=region_adjusted_estimate`, pressure/tier, aggregate AI mobilization/goals, catch-up distribution, accepted bundle commands, treasury grants, development-point batch totals/status, pair backlog, accepted best-friend promotions, and peace work |
 | `AI_AUDIT_BEGIN` / `AI_AUDIT_END` | Session start, tier escalation, and every tenth turn | Bounds and aggregate checks for a detailed audit block |
-| `DIPLOMACY_AUDIT` | Once inside every detailed audit block | Directional AI-to-AI and AI-to-human attitude count/minimum/average/maximum, native stance-block readback, accepted best-friend pair-command count, and total pairs |
-| `AI` | Once per active AI inside an audit block | Regions, general-led field armies, garrisons, army units, 20-unit full stacks, mobilization goal/shortfall, treasury target/grant, catch-up, selected bundles, and command status |
+| `DIPLOMACY_AUDIT` | Once inside every detailed audit block | Directional AI-to-AI and AI-to-human attitude count/minimum/average/maximum, `cooperation_mode=promotion_only`, accepted best-friend promotion count, and total pairs; no blocker mutation or readback is performed |
+| `AI` | Once per active AI inside an audit block | Regions, estimated field armies and garrisons, estimated army units and 20-unit full stacks, mobilization goal/shortfall, treasury target/grant, catch-up, selected bundles, unique development provinces, per-province points, accepted development calls/points, and command status |
 | `UI_NOTICE` | When a tier message command succeeds | Event key, tier, turn, and pressure |
 | `AI_WAR_SUPPRESSED` | At most once per declaring AI per turn | Number of protected peace commands issued after a declaration |
 
-The four catch-up counts in `STATE` and `AI_AUDIT_END` must sum to `active_ai`. `base_commands_ok` and `catchup_commands_ok` should also equal `active_ai` after a clean reconciliation. `ai_commanded_armies` is the sum of general-led AI land forces, `ai_army_goal` is the sum of each faction's `min(4 × regions, human parity target, 16)` goal, `ai_full_armies` counts those field armies with at least 20 units, and `ai_factions_at_army_goal` counts factions with no goal shortfall.
+The four catch-up counts in `STATE` and `AI_AUDIT_END` must sum to `active_ai`. `base_commands_ok` and `catchup_commands_ok` should also equal `active_ai` after a clean reconciliation. For supported `main_rome`, `ai_commanded_armies` sums each faction's estimated field armies: broad land-army forces minus one presumed settlement-garrison force per owned region, clamped at zero. `ai_army_goal` is the sum of each faction's `min(4 × regions, human parity target, 16)` goal; `ai_full_armies` and `army_units` are derived from the forces remaining in that estimate; and `ai_factions_at_army_goal` counts factions with no goal shortfall. These are model estimates, not native field/garrison classification.
 
-The bootstrap `WORLD_STATE` carries the most important activation totals even if the detailed file cannot be used: `active_ai`, `base_ok`, `catchup_ok`, `grant_count`, `grant_total`, pressure/tier, and `target_armies`. It does not replace the per-faction `AI` records, but it makes “the world reconciled and commands were attempted” observable at the bootstrap layer.
+The bootstrap `WORLD_STATE` carries the most important activation totals even if the detailed file cannot be used: `active_ai`, `base_ok`, `catchup_ok`, `grant_count`, `grant_total`, province-development totals/status, pressure/tier, and `target_armies`. It does not replace the per-faction `AI` records, but it makes “the world reconciled and commands were attempted” observable at the bootstrap layer.
 
 `base_command_ok=true` means the protected Rome II call returned without a Lua exception and the director cached the requested selection. It does **not** mean the value was read back from the engine: the audited Rome II faction interface provides no effect-bundle query.
 
-`peace_commands` similarly counts accepted peace commands, not independently proven treaty transitions. `best_friend_pair_commands_ok` counts AI pairs for which the protected block-and-refresh commands were accepted; it is not native readback of the resulting stance. `stance_block_checks` and `stance_blocked_directions` in `DIPLOMACY_AUDIT` are the separate native readback counters. Verify important outcomes in the campaign UI during the live smoke test.
+`development_points_per_province` is the tier value for the current reconciliation. `development_provinces` counts unique AI-owned provinces selected through one representative region each. `development_commands_ok` counts protected calls that returned without a Lua exception, `development_commands_failed` counts contained call errors, `development_owner_skips` counts representatives rejected by the final ownership guard, and `development_points_granted` is the requested-point total for accepted calls. One target failure does not abort later safe targets. `development_status` distinguishes an `accepted` batch from `already_granted`, `tier_zero`, `turn_unavailable`, `owner_changed`, `partial_error`, or `disabled_on_error`; `last_development_turn` exposes the saved deduplication guard. The turn high-water mark still advances after an attempted batch so a reload cannot duplicate an uncertain native mutation. These fields are not province-state or construction readback. They do not prove that CAI selected a building, spent the surplus, or upgraded a settlement.
+
+`peace_commands` similarly counts accepted peace commands, not independently proven treaty transitions. `best_friend_promotions_ok` counts AI pairs for which the protected bidirectional `BEST_FRIENDS` promotions were accepted; it is not native readback of the resulting stance or visible numeric affinity. Release 0.1.8 preserves 0.1.7's promotion-only profile and performs no stance hard block, forced refresh, or blocker readback. Verify important outcomes in the campaign UI during the live smoke test.
 
 `ai_ai_*` and `ai_human_*` are read from directional `faction_attitudes()` maps. They let a playtest compare whether AI-to-AI attitudes improve relative to AI-to-human attitudes, but WR does not write these numbers. The audited interface has no safe pair-specific numeric attitude setter, so the log must not be interpreted as proof of a hidden `+300` relation modifier.
 
@@ -123,7 +125,7 @@ The six status messages correspond to pressure bands 0, 20, 40, 65, 85, and 100.
 
 The status message is attempted only after both `UICreated` and successful world reconciliation. It is never invoked during `LoadingGame`. A missing message API or localization failure cannot authorize any additional campaign mutation.
 
-## Reading a 0.1.6 smoke test
+## Reading a 0.1.8 smoke test
 
 - No bootstrap file: the pack's loader may not have run, another `all_scripted.lua` may have won, an old pack may be selected, or file access may be blocked. Check the launcher and native script output.
 - `LOADER_START` without `MODULE_PATH_READY`: the preserved loader ran, but its path setup failed before the director route was attempted.
@@ -143,11 +145,13 @@ The status message is attempted only after both `UICreated` and successful world
 - `DIAGNOSTIC_SINK_ERROR`: the detailed file really did fail. `WORLD_STATE` still exposes compact activation totals and mechanics continue.
 - `WORLD_READY` with no detailed `SESSION_START`: check `DIAGNOSTIC_SINK_READY`/`DIAGNOSTIC_SINK_ERROR`; do not infer path failure merely from file absence.
 - `SESSION_START` plus `STATE`: the director reconciled the supported world and its protected commands returned. This is strong proof that the script is active, but not native-state readback.
-- `AI` records with high `garrison_armies` but low `commanded_armies`: expected for small factions. Only the latter consumes the field-army comparison target. Use `army_goal`, `army_shortfall`, `army_units`, and `full_armies` to watch mobilization over multiple turns.
-- `DIPLOMACY_AUDIT`: compare AI-to-AI and AI-to-human aggregates over successive scheduled audits. At Tier 85+, `stance_blocked_directions` should approach the number of successfully readable AI-to-AI directions after the pair backlog reaches zero. `best_friend_pair_commands_ok` remains command acceptance, not that readback.
+- `AI` records with high `garrison_armies` but low `commanded_armies`: expected for small factions under the region-subtracted estimate. `commanded_armies`, `army_units`, and `full_armies` are estimated rather than native force-type readback. Use `army_goal` and `army_shortfall` to watch mobilization over multiple turns, then confirm actual stacks in the campaign UI.
+- `development_status=accepted`: the director attempted this turn's tier-scaled batch without a protected call error or owner skip. `development_provinces` should count each unique AI province once and exclude the human; accepted, failed, and final owner-guard outcomes should reconcile with the eligible work. After saving and reloading in the same turn, expect `development_status=already_granted` with the same `last_development_turn`, not another grant. Preserve `partial_error`, `disabled_on_error`, or `owner_changed` records for diagnosis rather than expecting a same-turn retry. `tier_zero` means the current tier intentionally grants zero; `turn_unavailable` means the director could not establish a safe deduplication key.
+- High development-command totals with low-level captured buildings: not contradictory. The log proves requested input points, not CAI building choice or a retroactive upgrade. Judge settlement development over a new-campaign soak rather than four late-save turns.
+- `DIPLOMACY_AUDIT`: compare AI-to-AI and AI-to-human aggregates over successive scheduled audits. At Tier 85+, `best_friend_promotions_ok` records accepted bidirectional cooperation promotions after the pair backlog reaches zero. Historical attitude values may remain negative, and there is intentionally no stance-block readback.
 - `STATE` with no campaign message: campaign reconciliation worked; investigate `UICreated`, the custom event rows/localization, or message display.
 
-On a loaded save, the callbacks already exist before campaign lifecycle events begin. `LoadingGame` restores the six primitive named values when the interface is discoverable and remains read-only. `FirstTickAfterWorldCreated` is the normal first reconciliation edge. If the interface or world was not ready then, the first faction-turn callback in each campaign turn retries until success; it need not be the human's turn because the world scan independently locates and protects the human. A new campaign is therefore not required merely for the script to register, although it remains the only supported balance/army-cap starting point.
+On a loaded save, the callbacks already exist before campaign lifecycle events begin. `LoadingGame` restores seven primitive named values, including the global last-development-turn guard, when the interface is discoverable and remains read-only. `FirstTickAfterWorldCreated` is the normal first reconciliation edge. If the interface or world was not ready then, the first faction-turn callback in each campaign turn retries until success; it need not be the human's turn because the world scan independently locates and protects the human. A new campaign is therefore not required merely for the script to register, although it remains the only supported full balance and settlement-buildout starting point.
 
 ## What the attached live traces proved
 
@@ -181,11 +185,15 @@ That same block ends without `WORLD_READY` after emitting `WORLD_WAIT` at first 
 
 The later 0.1.5 live files close that activation gap. A loaded maximum-pressure `main_rome` save reaches `DIAGNOSTIC_SINK_READY`, `WORLD_STATE`, `WORLD_READY`, `SESSION_START`, `STATE`, and a complete AI audit. Every active AI reports the Tier 100 base and Catch-up 3 package, treasury grants recur as needed, and all 91 surviving AI pairs are eventually processed; the trace also records the forced end of the AI-to-AI wars. The context popup appears once and remains deduplicated after a full game exit, reload, and turn advance. These observations validate activation and reconciliation, not every long-run CAI roster or alliance outcome.
 
+The 0.1.6 traces complete reconciliation and audits, then the user reproduces a hard crash twice when opening the Diplomacy panel. Compared with 0.1.5, each processed pair received four new native operations: hard block and forced stance refresh in both directions. The same logs also show that `has_general()` did not separate settlement garrisons. Release 0.1.7 removes all hard-block, refresh, and invalid blocker-readback calls and replaces the failed army classifier with the clearly labeled region-subtracted estimate.
+
+The later 0.1.7 files prove that hotfix in the tested save: the Diplomacy panel opens, the campaign advances through turns 207–211, and every surviving AI remains on Tier 100 plus Catch-up 3 with treasury targets around 4.8–5.9 million. Rome grows from 138 to 148 of 173 regions while active AI falls from 14 to 12. More/full armies and heavy agent use are visible, but many captured settlements remain low-level. Because this is only four new development cycles in a late save, it motivates 0.1.8's narrow province-development input without certifying its outcome.
+
 ## Historical activation defects
 
 Release 0.1.1 attempted to acquire the interface only during the early director import. If `game_interface` was still `nil`, it returned without normal listeners and never retried. The detailed logger also began only after successful reconciliation, so the same defect removed both mechanics and their evidence.
 
-Release 0.1.2 added an independent bootstrap stream and a deferred `NewSession` handoff, but its custom director remained under `lua_scripts` and was required through an ambient, context-sensitive route. Release 0.1.3 removed that route ambiguity and the single-event gate, but its regression harness shared a global `events` table between loader and director; the native 0.1.3 trace exposed that unmodeled boundary. Release 0.1.4 passed the exact registry as an argument, and the native trace confirms that repair through event delivery and interface discovery. It then exposed the incorrect zero-argument campaign-name assumption. Release 0.1.5 corrected the predicate and completed native world reconciliation. Release 0.1.6 keeps that activation path and adds bounded files plus richer mobilization/diplomacy audit records.
+Release 0.1.2 added an independent bootstrap stream and a deferred `NewSession` handoff, but its custom director remained under `lua_scripts` and was required through an ambient, context-sensitive route. Release 0.1.3 removed that route ambiguity and the single-event gate, but its regression harness shared a global `events` table between loader and director; the native 0.1.3 trace exposed that unmodeled boundary. Release 0.1.4 passed the exact registry as an argument, and the native trace confirms that repair through event delivery and interface discovery. It then exposed the incorrect zero-argument campaign-name assumption. Release 0.1.5 corrected the predicate and completed native world reconciliation. Release 0.1.6 kept that activation path and added bounded files plus richer audits, but its whole-map hard-block/refresh delta crashed on Diplomacy-panel entry and its force classifier failed live. Release 0.1.7 removed the unsafe calls, labeled the replacement army figure as an estimate, and passed the native crash retest. Release 0.1.8 retains that path and adds deduplicated AI-province development work.
 
 ## Failure behavior
 

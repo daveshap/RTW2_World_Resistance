@@ -130,8 +130,8 @@ assert_true(#lines == 808, "oversized log retains 800 old records plus eight boo
 assert_true(lines[1] == "old-206", "compaction retains the newest 800 old records")
 assert_true(lines[800] == "old-1005", "compaction retains the newest old record")
 assert_true(
-    string.find(lines[801], "|release=0.1.6-beta|", 1, true) ~= nil,
-    "new bootstrap records carry the 0.1.6 release"
+    string.find(lines[801], "|release=0.1.8-beta|", 1, true) ~= nil,
+    "new bootstrap records carry the 0.1.8 release"
 )
 
 for i = 1, 450 do

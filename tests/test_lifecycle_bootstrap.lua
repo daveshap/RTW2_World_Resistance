@@ -157,7 +157,8 @@ local loaded_values = {
     wr2_wr_tier_v1 = 2,
     wr2_wr_demotion_turns_v1 = 3,
     wr2_wr_diplomacy_peak_v1 = 2,
-    wr2_wr_highest_notified_tier_v1 = 2
+    wr2_wr_highest_notified_tier_v1 = 2,
+    wr2_wr_last_development_turn_v1 = 41
 }
 
 local game = {}
@@ -267,7 +268,7 @@ local episodic = { game_interface = game }
 package.loaded["lua_scripts.EpisodicScripting"] = episodic
 
 events.LoadingGame[1]({ existing_save = true })
-assert_true(count_calls("load_named_value") == 6, "existing-save state is loaded through all six named values")
+assert_true(count_calls("load_named_value") == 7, "existing-save state is loaded through all seven named values")
 assert_true(count_calls("apply_effect_bundle") == 0, "LoadingGame performs no world mutation")
 assert_true(count_calls("treasury_mod") == 0, "LoadingGame performs no treasury mutation")
 

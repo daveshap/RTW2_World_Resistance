@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Build the Lua-only World Resistance 0.1.6 hotfix from the verified v0.1.1 pack.
+"""Build the Lua-only World Resistance 0.1.8 hotfix from the verified v0.1.1 pack.
 
-The 0.1.6 release keeps the verified DB/Loc payloads while correcting field-
-army telemetry, adding region-proportional mobilization goals, strengthening
-AI-only strategic cooperation, and bounding local diagnostic logs.
+The 0.1.8 release keeps the verified DB/Loc payloads and the live-stable 0.1.7
+activation/diplomacy profile while adding once-per-turn, AI-only province
+development support with save/load deduplication and explicit telemetry.
 Its five RPFM-encoded DB tables and Loc payload are copied byte-for-byte from
 the v0.1.1 pack that was already encoded, reopened, exported, and compared
 with source under RPFM 5.0.5. This builder refuses to run unless the complete
@@ -48,11 +48,11 @@ except ImportError:
     from pfh4 import PackFormatError, read_pack, validate_pack, write_pack_file
 
 
-BUILD_TOOL_VERSION = "1.6.0-hotfix"
-RELEASE_VERSION = "0.1.6-beta"
+BUILD_TOOL_VERSION = "1.8.0-hotfix"
+RELEASE_VERSION = "0.1.8-beta"
 BASE_RELEASE_VERSION = "0.1.1-beta"
 BASE_PACK_SHA256 = "9ca3cf59de7d1851110994917b43a777b46f5adf05c7b61e274439669fbada4e"
-DIRECTOR_VERSION = 8
+DIRECTOR_VERSION = 10
 TELEMETRY_SCHEMA = 1
 PACK_FILENAME = "@wr2_world_resistance.pack"
 BOOTSTRAP_LOG_PATH = "wr2_world_resistance_bootstrap.log"
@@ -206,10 +206,15 @@ def build(
             "initialization_event": "FirstTickAfterWorldCreated",
             "initialization_retry": "first_FactionTurnStart_each_campaign_turn",
             "world_diagnostics": "reasoned_bootstrap_state_and_sink_status",
-            "army_measurement": "general_led_land_forces_only",
+            "army_measurement": "region_adjusted_land_force_estimate",
             "ai_army_goal": "min_four_per_region_human_parity_sixteen",
-            "ai_cooperation": "pair_scoped_best_friends_lock_at_tier_85",
+            "ai_cooperation": "pair_scoped_best_friends_promotion_no_native_locks",
             "visible_attitude_mutation": "read_only_telemetry_no_unsafe_global_bonus",
+            "development_support": "per_ai_province_once_per_turn_tier_scaled",
+            "development_scale_by_tier": [0, 0, 1, 1, 2, 3],
+            "development_human_isolation": "current_owner_rechecked_before_each_command",
+            "development_save_deduplication": "global_campaign_turn_high_water_mark",
+            "settlement_measurement": "region_num_buildings_read_only",
         },
         "inputs": current_inputs,
         "validated_contract": prior["validated_contract"],

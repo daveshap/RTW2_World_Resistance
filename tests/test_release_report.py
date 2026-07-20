@@ -17,7 +17,7 @@ class ReleaseReportTests(unittest.TestCase):
         cls.report = json.loads(REPORT_PATH.read_text(encoding="utf-8"))
 
     def test_release_and_target(self) -> None:
-        self.assertEqual(self.report["release_version"], "0.1.6-beta")
+        self.assertEqual(self.report["release_version"], "0.1.8-beta")
         self.assertEqual(self.report["target"]["game"], "rome_2")
         self.assertEqual(self.report["target"]["campaign"], "main_rome")
 
@@ -38,7 +38,7 @@ class ReleaseReportTests(unittest.TestCase):
     def test_runtime_and_manual_pack_contract(self) -> None:
         runtime = self.report["runtime_contract"]
         self.assertEqual(runtime["pack_filename"], "@wr2_world_resistance.pack")
-        self.assertEqual(runtime["director_version"], 8)
+        self.assertEqual(runtime["director_version"], 10)
         self.assertEqual(runtime["telemetry_schema"], 1)
         self.assertEqual(
             runtime["bootstrap_log_path"], "wr2_world_resistance_bootstrap.log"
@@ -77,18 +77,33 @@ class ReleaseReportTests(unittest.TestCase):
         )
         self.assertEqual(runtime["diagnostic_log_max_lines"], 1000)
         self.assertEqual(runtime["diagnostic_log_keep_lines"], 800)
-        self.assertEqual(runtime["army_measurement"], "general_led_land_forces_only")
+        self.assertEqual(
+            runtime["army_measurement"], "region_adjusted_land_force_estimate"
+        )
         self.assertEqual(
             runtime["ai_army_goal"],
             "min_four_per_region_human_parity_sixteen",
         )
         self.assertEqual(
             runtime["ai_cooperation"],
-            "pair_scoped_best_friends_lock_at_tier_85",
+            "pair_scoped_best_friends_promotion_no_native_locks",
         )
         self.assertEqual(
             runtime["visible_attitude_mutation"],
             "read_only_telemetry_no_unsafe_global_bonus",
+        )
+        self.assertEqual(
+            runtime["development_support"],
+            "per_ai_province_once_per_turn_tier_scaled",
+        )
+        self.assertEqual(runtime["development_scale_by_tier"], [0, 0, 1, 1, 2, 3])
+        self.assertEqual(
+            runtime["development_human_isolation"],
+            "current_owner_rechecked_before_each_command",
+        )
+        self.assertEqual(
+            runtime["development_save_deduplication"],
+            "global_campaign_turn_high_water_mark",
         )
         self.assertEqual(
             sorted(path.name for path in (ROOT / "dist").glob("*.pack")),
@@ -137,7 +152,9 @@ class ReleaseReportTests(unittest.TestCase):
             "DIAGNOSTIC_SINK_ERROR",
         ):
             self.assertIn(milestone, loader + director)
-        self.assertIn('local VERSION = 8', director)
+        self.assertIn('local VERSION = 10', director)
+        self.assertIn("add_development_points_to_region", director)
+        self.assertIn("wr2_wr_last_development_turn_v1", director)
         self.assertIn("return director.setup(event_registry)", loader)
         self.assertIn("WR.setup = setup", director)
         self.assertNotIn('rawget(_G, "events")', director)
@@ -148,6 +165,14 @@ class ReleaseReportTests(unittest.TestCase):
         self.assertNotIn('require, "lua_scripts.EpisodicScripting"', director)
         self.assertIn('rawget(_G, "EpisodicScripting")', director)
         self.assertIn('diagnostic_log_path = "data/wr2_world_resistance.log"', director)
+        self.assertIn('{ "cooperation_mode", "promotion_only" }', director)
+        self.assertIn("best_friend_promotions_ok", director)
+        for unsafe_native_call in (
+            "cai_strategic_stance_manager_block_all_stances_but_that_specified_towards_target_faction",
+            "cai_strategic_stance_manager_force_stance_update_between_factions",
+            "strategic_stance_between_factions_is_being_blocked",
+        ):
+            self.assertNotIn(unsafe_native_call, director)
 
     def test_lua_only_hotfix_payload_provenance(self) -> None:
         provenance = self.report["payload_provenance"]

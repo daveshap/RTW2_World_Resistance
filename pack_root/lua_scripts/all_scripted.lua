@@ -19,7 +19,7 @@ events = triggers.events
 -- and native-output operation is protected: a read-only install must never
 -- abort Rome II's campaign loader.
 local WR_BOOT_LOG_PATH = "wr2_world_resistance_bootstrap.log"
-local WR_BOOT_RELEASE = "0.1.6-beta"
+local WR_BOOT_RELEASE = "0.1.8-beta"
 local WR_BOOT_LOG_MAX_LINES = 1000
 local WR_BOOT_LOG_RETAIN_LINES = 800
 local WR_BOOT_LOAD_ID = tostring({})

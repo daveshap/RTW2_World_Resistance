@@ -27,7 +27,8 @@ local loaded = {
     wr2_wr_tier_v1 = 0,
     wr2_wr_demotion_turns_v1 = 0,
     wr2_wr_diplomacy_peak_v1 = 0,
-    wr2_wr_highest_notified_tier_v1 = -1
+    wr2_wr_highest_notified_tier_v1 = -1,
+    wr2_wr_last_development_turn_v1 = -1
 }
 
 local function record(kind, ...)
@@ -54,7 +55,9 @@ local function force(kind)
             return kind == "navy"
         end,
         has_general = function(self)
-            return kind == "army"
+            -- Live Rome II returned true for settlement garrison forces too.
+            -- The director must not depend on this value for army parity.
+            return kind == "army" or kind == "garrison"
         end,
         unit_list = function(self)
             local units = {}
@@ -68,12 +71,42 @@ local function force(kind)
     }
 end
 
+local function region(owner, index)
+    local result = {
+        _key = owner._key .. "_region_" .. tostring(index),
+        _province = owner._key .. "_province_" .. tostring(math.floor((index + 1) / 2)),
+        _owner = owner
+    }
+    function result:name()
+        return self._key
+    end
+    function result:province_name()
+        return self._province
+    end
+    function result:owning_faction()
+        return self._owner
+    end
+    function result:num_buildings()
+        return 2
+    end
+    return result
+end
+
 local function faction(key, human, region_count, army_count, treasury, imperium)
-    local regions = {}
     local forces = {}
+    local result = {
+        _key = key,
+        _human = human,
+        _regions = {},
+        _forces = forces,
+        _treasury = treasury,
+        _imperium = imperium,
+        _attitudes = {},
+        _wars = {}
+    }
     local i
     for i = 1, region_count do
-        regions[i] = { key = key .. "_region_" .. tostring(i) }
+        result._regions[i] = region(result, i)
     end
     for i = 1, army_count do
         forces[i] = force("army")
@@ -81,16 +114,6 @@ local function faction(key, human, region_count, army_count, treasury, imperium)
     for i = 1, region_count do
         forces[army_count + i] = force("garrison")
     end
-    local result = {
-        _key = key,
-        _human = human,
-        _regions = regions,
-        _forces = forces,
-        _treasury = treasury,
-        _imperium = imperium,
-        _attitudes = {},
-        _wars = {}
-    }
     function result:name()
         return self._key
     end
@@ -147,12 +170,8 @@ for i = 1, 173 do
     all_regions[i] = { key = "region_" .. tostring(i) }
 end
 
-local model = {}
+local model = { _turn = 77 }
 local world = {}
-local campaign_ai = {}
-function campaign_ai:strategic_stance_between_factions_is_being_blocked(_a, _b)
-    return true
-end
 function model:world()
     return world
 end
@@ -163,10 +182,7 @@ function model:campaign_name(campaign_key)
     return true
 end
 function model:turn_number()
-    return 77
-end
-function model:campaign_ai()
-    return campaign_ai
+    return self._turn
 end
 function world:faction_list()
     return list(factions)
@@ -192,17 +208,17 @@ end
 function game:treasury_mod(faction_key, amount)
     record("treasury_mod", faction_key, amount)
 end
+function game:add_development_points_to_region(region_key, amount)
+    if self._development_error then
+        error("simulated development binding failure")
+    end
+    record("add_development_points_to_region", region_key, amount)
+end
 function game:force_diplomacy(a, b, deal, offer, accept)
     record("force_diplomacy", a, b, deal, offer, accept)
 end
 function game:cai_strategic_stance_manager_promote_specified_stance_towards_target_faction(a, b, stance)
     record("promote_stance", a, b, stance)
-end
-function game:cai_strategic_stance_manager_block_all_stances_but_that_specified_towards_target_faction(a, b, stance)
-    record("block_stance", a, b, stance)
-end
-function game:cai_strategic_stance_manager_force_stance_update_between_factions(a, b)
-    record("force_stance_update", a, b)
 end
 function game:force_make_peace(a, b)
     record("force_make_peace", a, b)
@@ -271,9 +287,8 @@ local mutation_before_first_tick = count_calls("apply_effect_bundle")
     + count_calls("treasury_mod")
     + count_calls("force_diplomacy")
     + count_calls("promote_stance")
-    + count_calls("block_stance")
-    + count_calls("force_stance_update")
     + count_calls("force_make_peace")
+    + count_calls("add_development_points_to_region")
 assert_true(mutation_before_first_tick == 0, "LoadingGame is read-only")
 assert_true(count_calls("show_message_event") == 0, "LoadingGame never invokes UI")
 
@@ -320,8 +335,8 @@ for _, line in ipairs(native_logs) do
     if string.find(line, "WR2|schema=1|event=DIPLOMACY_AUDIT", 1, true)
         and string.find(line, "|ai_ai_count=6|", 1, true)
         and string.find(line, "|ai_human_count=3|", 1, true)
-        and string.find(line, "|stance_block_checks=6|", 1, true)
-        and string.find(line, "|stance_blocked_directions=6|", 1, true) then
+        and string.find(line, "|cooperation_mode=promotion_only|", 1, true)
+        and string.find(line, "|best_friend_promotions_ok=2|", 1, true) then
         saw_diplomacy_audit = true
     end
     if string.find(line, "local diagnostic file batch skipped safely", 1, true) then
@@ -332,6 +347,19 @@ assert_true(saw_session, "native out.ting receives the session trace")
 assert_true(saw_state, "native out.ting receives the structured state trace")
 assert_true(saw_diplomacy_audit, "periodic audit separates AI-AI from AI-human attitudes")
 assert_true(saw_file_failure, "file failure is reported natively and remains nonfatal")
+assert_true(
+    count_calls("add_development_points_to_region") == 7,
+    "Tier 85 grants once per unique AI-owned province"
+)
+for _, call in ipairs(calls) do
+    if call.kind == "add_development_points_to_region" then
+        assert_true(call.args[2] == 2, "Tier 85 grants two development points")
+        assert_true(
+            string.find(call.args[1], "rom_rome", 1, true) == nil,
+            "human regions receive no development points"
+        )
+    end
+end
 
 -- A second callback in the same Lua campaign session must be a no-op.
 events.FirstTickAfterWorldCreated[1]({})
@@ -360,9 +388,7 @@ for _, call in ipairs(calls) do
     elseif call.kind == "force_diplomacy"
         or call.kind == "force_make_peace"
         or call.kind == "force_make_trade_agreement"
-        or call.kind == "promote_stance"
-        or call.kind == "block_stance"
-        or call.kind == "force_stance_update" then
+        or call.kind == "promote_stance" then
         local a = call.args[1]
         local b = call.args[2]
         assert_true(a ~= "rom_rome" and b ~= "rom_rome", "diplomacy call must be AI-to-AI")
@@ -382,18 +408,24 @@ assert_true(treasury_by_faction.rom_rome == nil, "human receives no treasury gra
 assert_true(count_calls("force_make_peace") == 1, "existing AI-AI war is ended at tier 85")
 assert_true(ally._wars[neutral._key] ~= true, "mock AI-AI war state is peaceful")
 assert_true(count_calls("promote_stance") == 6, "all three AI pairs receive bidirectional stance promotion")
-assert_true(count_calls("block_stance") == 6, "all three AI pairs are locked to best-friends stance")
-assert_true(count_calls("force_stance_update") == 6, "all three AI-pair directions refresh immediately")
 assert_true(count_calls("force_make_trade_agreement") == 0, "forced trade waits for tier 100")
 
 local snapshot = WR.debug_snapshot()
 assert_true(snapshot.ai_count == 3, "all and only active AIs counted")
 assert_true(snapshot.tier == 4, "ninety regions reaches tier 85")
 assert_true(snapshot.target_armies == 16, "final Imperium army parity target")
-assert_true(snapshot.ai_commanded_armies == 6, "only general-led AI field armies are counted")
-assert_true(snapshot.ai_full_armies == 6, "twenty-unit commanded armies are reported as full")
+assert_true(snapshot.ai_commanded_armies == 6, "regional garrisons are subtracted from AI field-army estimates")
+assert_true(snapshot.ai_full_armies == 6, "largest estimated field stacks are reported as full")
 assert_true(snapshot.ai_army_goal == 16 + 12 + 16, "AI goals use four armies per region capped at sixteen")
-assert_true(snapshot.best_friend_pair_commands_ok == 3, "all AI pairs report accepted stance-lock commands")
+assert_true(snapshot.best_friend_promotions_ok == 3, "all AI pairs report accepted best-friends promotions")
+assert_true(snapshot.development_status == "accepted", "development batch is accepted")
+assert_true(snapshot.development_points_per_province == 2, "Tier 85 development scale is reported")
+assert_true(snapshot.development_provinces == 7, "unique AI provinces are reported")
+assert_true(snapshot.development_commands_ok == 7, "accepted development commands are reported")
+assert_true(snapshot.development_commands_failed == 0, "successful development batch reports no failures")
+assert_true(snapshot.development_owner_skips == 0, "stable ownership reports no development skips")
+assert_true(snapshot.development_points_granted == 14, "requested development points are reported")
+assert_true(snapshot.last_development_turn == 77, "development turn high-water mark is reported")
 
 events.SavingGame[1]({})
 assert_true(saved.wr2_wr_pressure_v1 ~= nil, "pressure saved")
@@ -401,6 +433,7 @@ assert_true(saved.wr2_wr_permanent_floor_v1 == 65, "permanent floor saved")
 assert_true(saved.wr2_wr_tier_v1 == 4, "tier saved")
 assert_true(saved.wr2_wr_diplomacy_peak_v1 == 4, "diplomacy high-water mark saved")
 assert_true(saved.wr2_wr_highest_notified_tier_v1 == 4, "highest UI tier saved")
+assert_true(saved.wr2_wr_last_development_turn_v1 == 77, "development turn high-water mark saved")
 
 -- Restoring the saved high-water mark and recreating the UI must not repeat an
 -- already acknowledged tier notification.
@@ -414,12 +447,17 @@ assert_true(
     count_calls("show_message_event") == notices_before_reload,
     "saved UI high-water mark prevents reload duplicates"
 )
+assert_true(
+    count_calls("add_development_points_to_region") == 7,
+    "same-turn reload does not duplicate development grants"
+)
 
 -- Seventy percent of the live map reaches tier 100. Every AI pair is then
 -- trade-forced while war remains blocked; no command may include the human.
 for i = #rome._regions + 1, 122 do
-    rome._regions[i] = { key = "rom_rome_region_" .. tostring(i) }
+    rome._regions[i] = region(rome, i)
 end
+model._turn = 78
 events.FactionTurnStart[1]({
     faction = function(self)
         return rome
@@ -429,6 +467,16 @@ local maximum = WR.debug_snapshot()
 assert_true(maximum.pressure == 100, "seventy percent map reaches pressure 100")
 assert_true(maximum.tier == 5, "pressure 100 applies the maximum tier")
 assert_true(maximum.diplomacy_peak == 5, "maximum diplomacy mode is permanent")
+assert_true(maximum.diplomatic_calls == 75, "tier 100 remains at the stable 25-call profile per AI pair")
+assert_true(maximum.development_points_per_province == 3, "Tier 100 grants three points per AI province")
+assert_true(maximum.development_commands_ok == 7, "new turn grants each AI province once")
+assert_true(maximum.development_commands_failed == 0, "Tier 100 development reports no failures")
+assert_true(maximum.development_points_granted == 21, "Tier 100 requested development total is reported")
+assert_true(maximum.last_development_turn == 78, "new campaign turn advances development high-water mark")
+assert_true(
+    count_calls("add_development_points_to_region") == 14,
+    "development grants repeat only on a new campaign turn"
+)
 assert_true(count_calls("force_make_trade_agreement") == 3, "all AI pairs receive forced trade at maximum")
 assert_true(count_calls("show_message_event") == 2, "maximum tier creates one additional notice")
 local last_status_key = nil
@@ -438,6 +486,57 @@ for _, call in ipairs(calls) do
     end
 end
 assert_true(last_status_key == "custom_event_23182005", "maximum notice uses the Tier 100 event")
+
+-- A native development failure is contained per target, reported honestly,
+-- and never retried in the same turn. Other world reconciliation continues.
+model._turn = 79
+game._development_error = true
+events.FactionTurnStart[1]({
+    faction = function(self)
+        return rome
+    end
+})
+local failed_development = WR.debug_snapshot()
+assert_true(failed_development.development_status == "disabled_on_error", "all-target failure is explicit")
+assert_true(failed_development.development_commands_ok == 0, "failed native commands are not accepted")
+assert_true(failed_development.development_commands_failed == 7, "every failed province command is counted")
+assert_true(failed_development.last_development_turn == 79, "failed batch still advances dedupe turn")
+assert_true(count_calls("add_development_points_to_region") == 14, "failed calls do not forge accepted records")
+
+events.FactionTurnStart[1]({
+    faction = function(self)
+        return rome
+    end
+})
+assert_true(
+    count_calls("add_development_points_to_region") == 14,
+    "failed batch is not repeated in the same campaign turn"
+)
+
+game._development_error = false
+model._turn = 80
+events.FactionTurnStart[1]({
+    faction = function(self)
+        return rome
+    end
+})
+assert_true(count_calls("add_development_points_to_region") == 21, "development resumes on the next turn")
+
+-- If ownership changes between collection and mutation, the human-protection
+-- guard skips that representative rather than trusting stale faction state.
+ally._regions[1]._owner = rome
+model._turn = 81
+events.FactionTurnStart[1]({
+    faction = function(self)
+        return rome
+    end
+})
+local ownership_changed = WR.debug_snapshot()
+assert_true(ownership_changed.development_status == "owner_changed", "owner change is explicit")
+assert_true(ownership_changed.development_owner_skips == 1, "changed owner is counted once")
+assert_true(ownership_changed.development_commands_ok == 6, "other AI provinces still receive support")
+assert_true(count_calls("add_development_points_to_region") == 27, "human-owned representative is skipped")
+ally._regions[1]._owner = ally
 
 -- If an AI declaration slips through the campaign AI, the audited event
 -- exposes the declarer's character. The callback must end only AI-AI wars.
@@ -473,9 +572,7 @@ for _, call in ipairs(calls) do
     if call.kind == "force_diplomacy"
         or call.kind == "force_make_peace"
         or call.kind == "force_make_trade_agreement"
-        or call.kind == "promote_stance"
-        or call.kind == "block_stance"
-        or call.kind == "force_stance_update" then
+        or call.kind == "promote_stance" then
         assert_true(call.args[1] ~= "rom_rome" and call.args[2] ~= "rom_rome", "maximum-tier diplomacy remains AI-only")
     end
 end
